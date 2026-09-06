@@ -1,0 +1,129 @@
+#editor {
+  width: 1576px;
+  height: 720px;
+}
+
+#trainer-kit {
+  width: 1576px;
+  height: 720px;
+  position: relative;
+}
+
+#trainer-kit-svg {
+  width: 1576px;
+  height: 720px;
+  user-select: none;
+  touch-action: none;
+  display: block;
+}
+
+/* Terminal Pins & Contacts */
+.terminal-pin {
+  cursor: pointer;
+}
+
+.terminal-pin:hover {
+  filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.9));
+}
+
+.terminal-hover-ring {
+  transition: opacity 0.15s ease-in-out;
+}
+
+.terminal-pin.wire-start-active .terminal-hover-ring {
+  opacity: 1 !important;
+  stroke: #38bdf8 !important;
+  stroke-width: 3.5px !important;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 1)) !important;
+}
+
+/* Master Power Button */
+.master-power-btn {
+  cursor: pointer;
+}
+
+.master-power-btn:hover {
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.5));
+}
+
+/* Manual Pulse Button Box */
+.manual-pulse-box {
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.manual-pulse-box:hover rect[id="pulse-box-rect"] {
+  stroke: #ef4444;
+}
+
+/* Toggle Switches */
+.input-toggle-switch {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.input-toggle-switch:hover circle[id^="switch-knob-"] {
+  stroke: #38bdf8;
+  stroke-width: 2px;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.6));
+}
+
+/* IC Sockets & Chips */
+.exact-ic-base rect[id^="ic-base-body-"] {
+  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.exact-ic-base:hover rect[id^="ic-base-body-"] {
+  stroke: #38bdf8;
+  stroke-width: 2px;
+}
+
+.chip-remove-btn {
+  opacity: 0.85;
+  transition: opacity 0.2s ease;
+}
+
+.chip-remove-btn:hover {
+  opacity: 1;
+  filter: drop-shadow(0 2px 4px rgba(239, 68, 68, 0.8));
+}
+
+/* Wires & Connections */
+.circuit-wire-group {
+  transition: opacity 0.15s ease;
+}
+
+.circuit-wire-group:hover .wire-main {
+  stroke-width: 5px;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.6));
+}
+
+.circuit-wire-group.wire-marked-delete .wire-main {
+  stroke: #ef4444 !important;
+  stroke-dasharray: 6 3;
+  animation: wire-dash-anim 0.4s linear infinite;
+}
+
+@keyframes wire-dash-anim {
+  to {
+    stroke-dashoffset: -9;
+  }
+}
+
+#wire-preview-path {
+  animation: wire-preview-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes wire-preview-pulse {
+  0%, 100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* 7-Segment Displays */
+[id^="disp-"][id*="-seg-"] {
+  transition: fill 0.04s ease-out;
+}
