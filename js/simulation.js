@@ -188,22 +188,44 @@ export class CircuitSimulator {
     return prevId !== null;
   }
 
-  addWire(from, to, color = '#F64E4D') {
-    // Normalization check: from and to should be distinct terminals
-    if (from.comp === to.comp && from.pin === to.pin) return null;
+  _normalizeEndpoint(ep) {
+    if (!ep) return null;
+    let comp = String(ep.comp).toLowerCase().trim();
+    let pin = String(ep.pin).toLowerCase().trim();
 
-    // Check if wire already exists
-    const exists = this.wires.some(w =>
-      (w.from.comp === from.comp && w.from.pin === from.pin && w.to.comp === to.comp && w.to.pin === to.pin) ||
-      (w.from.comp === to.comp && w.from.pin === to.pin && w.to.comp === from.comp && w.to.pin === from.pin)
-    );
+    if (comp === 'power' && pin === 'vcc') { comp = 'vcc'; pin = '0'; }
+    else if (comp === 'power' && pin === 'gnd') { comp = 'gnd'; pin = '0'; }
+    else if (comp === 'vcc') { pin = '0'; }
+    else if (comp === 'gnd') { pin = '0'; }
+    else if (comp === 'output') { comp = 'led'; }
+    else if (comp.startsWith('ic_')) { comp = comp.replace('ic_', 'icbase_'); }
+    else if (comp.startsWith('base_')) { comp = comp.replace('base_', 'icbase_'); }
+
+    return { comp, pin };
+  }
+
+  addWire(from, to, color = '#F64E4D') {
+    const nFrom = this._normalizeEndpoint(from);
+    const nTo = this._normalizeEndpoint(to);
+    if (!nFrom || !nTo) return null;
+    if (nFrom.comp === nTo.comp && nFrom.pin === nTo.pin) return null;
+
+    // Check if wire already exists (normalized)
+    const exists = this.wires.some(w => {
+      const wFrom = this._normalizeEndpoint(w.from);
+      const wTo = this._normalizeEndpoint(w.to);
+      return (
+        (wFrom.comp === nFrom.comp && wFrom.pin === nFrom.pin && wTo.comp === nTo.comp && wTo.pin === nTo.pin) ||
+        (wFrom.comp === nTo.comp && wFrom.pin === nTo.pin && wTo.comp === nFrom.comp && wTo.pin === nFrom.pin)
+      );
+    });
     if (exists) return null;
 
     const wire = {
       id: `w_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      from,
-      to,
-      color,
+      from: nFrom,
+      to: nTo,
+      color: color || '#F64E4D',
       level: 0
     };
 
@@ -262,7 +284,11 @@ export class CircuitSimulator {
 
     // Constant power drivers
     drivers.set('power:vcc', 1);
+    drivers.set('vcc:0', 1);
+    drivers.set('vcc:vcc', 1);
     drivers.set('power:gnd', 0);
+    drivers.set('gnd:0', 0);
+    drivers.set('gnd:gnd', 0);
 
     // Switches as drivers
     this.switches.forEach((val, i) => {
@@ -271,10 +297,14 @@ export class CircuitSimulator {
 
     // Clock signals as drivers
     drivers.set('clock:0.5', this.clocks[0.5]);
+    drivers.set('clock:0_5', this.clocks[0.5]);
     drivers.set('clock:1', this.clocks[1]);
     drivers.set('clock:5', this.clocks[5]);
     drivers.set('clock:10', this.clocks[10]);
     drivers.set('clock:manual', this.clocks.manual);
+    drivers.set('clock:manual_inv', this.clocks.manual === 1 ? 0 : 1);
+    drivers.set('clock:high', this.clocks.manual);
+    drivers.set('clock:low', this.clocks.manual === 1 ? 0 : 1);
 
     // Reset IC pin input levels before propagation
     this.icBases.forEach((base, bIdx) => {
@@ -363,9 +393,11 @@ export class CircuitSimulator {
               if (icDef.pins === 14 && p >= 8 && p <= 14) {
                 const socketPin = 20 - (14 - p);
                 drivers.set(`icbase_${bIdx}:${socketPin}`, val);
+                drivers.set(`icbase_${bIdx}:socket_${socketPin}`, val);
               } else if (icDef.pins === 16 && p >= 9 && p <= 16) {
                 const socketPin = 20 - (16 - p);
                 drivers.set(`icbase_${bIdx}:${socketPin}`, val);
+                drivers.set(`icbase_${bIdx}:socket_${socketPin}`, val);
               }
 
               if (oldVal !== val) {
@@ -472,18 +504,29 @@ export class CircuitSimulator {
   _applySignalToEndpoint(endpoint, signal) {
     if (endpoint.comp.startsWith('icbase_')) {
       const bIdx = Number(endpoint.comp.replace('icbase_', ''));
-      let pinNum = Number(endpoint.pin);
+      let pinStr = String(endpoint.pin).trim();
       const base = this.icBases[bIdx];
       if (!base || !base.icId) return;
 
       const icDef = IC_LIBRARY[base.icId];
       if (!icDef) return;
 
+      let pinNum = Number(pinStr);
+
       // Translate socket pin number to IC pin number if socket pin was targeted
-      if (icDef.pins === 14 && pinNum > 14 && pinNum <= 20) {
-        pinNum = 14 - (20 - pinNum); // 20 -> 14 (VCC), 19 -> 13, ..., 14 -> 8
+      if (pinStr.startsWith('socket_')) {
+        const sNum = parseInt(pinStr.replace('socket_', ''), 10);
+        if (icDef.pins === 14 && sNum >= 14 && sNum <= 20) {
+          pinNum = 14 - (20 - sNum);
+        } else if (icDef.pins === 16 && sNum >= 13 && sNum <= 20) {
+          pinNum = 16 - (20 - sNum);
+        } else {
+          pinNum = sNum;
+        }
+      } else if (icDef.pins === 14 && pinNum > 14 && pinNum <= 20) {
+        pinNum = 14 - (20 - pinNum); // 20 -> 14 (VCC), 19 -> 13, ..., 15 -> 9
       } else if (icDef.pins === 16 && pinNum > 16 && pinNum <= 20) {
-        pinNum = 16 - (20 - pinNum); // 20 -> 16 (VCC), 19 -> 15, ..., 13 -> 9
+        pinNum = 16 - (20 - pinNum); // 20 -> 16 (VCC), 19 -> 15, ..., 17 -> 9
       }
 
       if (base.pins[pinNum] && base.pins[pinNum].type === 'input') {
@@ -572,8 +615,8 @@ export class CircuitSimulator {
       });
     });
 
-    const activeSwitches = Array.from(connectedSwitchesSet).sort((a, b) => b - a);
-    const activeLeds = Array.from(connectedLedsSet).sort((a, b) => b - a);
+    const activeSwitches = Array.from(connectedSwitchesSet).sort((a, b) => a - b);
+    const activeLeds = Array.from(connectedLedsSet).sort((a, b) => a - b);
     const activeICs = Array.from(activeICsMap.values()).sort((a, b) => a.baseIndex - b.baseIndex);
 
     if (activeSwitches.length === 0 || activeLeds.length === 0) {
@@ -610,7 +653,14 @@ export class CircuitSimulator {
     // Backup current circuit state
     const prevPower = this.power;
     const prevSwitches = [...this.switches];
+    const prevLeds = [...this.leds];
+    const prevWireLevels = this.wires.map(w => w.level);
     const prevStates = this.icBases.map(b => JSON.parse(JSON.stringify(b.state || {})));
+    const prevPinLevels = this.icBases.map(b => {
+      const pins = {};
+      Object.entries(b.pins || {}).forEach(([p, d]) => { pins[p] = d.level; });
+      return pins;
+    });
     const prevSuppress = this._suppressNotify;
 
     this._suppressNotify = true;
@@ -653,14 +703,30 @@ export class CircuitSimulator {
       });
     }
 
-    // Restore original state
+    // Restore original state completely to prevent phantom LED illumination
     this.power = prevPower;
     this.switches = prevSwitches;
+    this.leds = prevLeds;
+    this.wires.forEach((w, idx) => {
+      w.level = prevWireLevels[idx] !== undefined ? prevWireLevels[idx] : 0;
+    });
     this.icBases.forEach((b, i) => {
       b.state = prevStates[i];
+      if (b.pins && prevPinLevels[i]) {
+        Object.entries(prevPinLevels[i]).forEach(([p, lvl]) => {
+          if (b.pins[p]) b.pins[p].level = lvl;
+        });
+      }
     });
     this._suppressNotify = prevSuppress;
-    this.evaluate();
+
+    if (prevPower) {
+      this.evaluate();
+    } else {
+      this.leds.fill(0);
+      this.wires.forEach(w => w.level = 0);
+      this.notify();
+    }
 
     return {
       inputs: activeSwitches,

@@ -11,10 +11,11 @@ import { StorageManager } from './storage.js';
 import { DatasheetViewer } from './datasheet.js';
 import { IC_LIBRARY, IC_CATEGORIES } from './ic-library.js';
 import { LAB_PRESETS } from './presets.js';
+import { DigitalLogicSuite } from './logic-suite.js';
 
 class DeldApp {
   constructor() {
-    this.activeTool = 'select'; // 'select' | 'wire' | 'add-ic' | 'remove-ic' | 'remove-wire' | 'hand'
+    this.activeTool = 'wire'; // 'wire' | 'select' | 'add-ic' | 'remove-ic' | 'remove-wire' | 'hand'
     this.circuitName = 'Untitled Circuit';
 
     // Canvas Pan & Zoom State
@@ -26,6 +27,8 @@ class DeldApp {
 
     // Active wire drawing state
     this.wireStart = null; // { comp, pin, coord: {x, y} }
+    this.selectedPin = null; // Absolute pin selection: { comp, pin, coord }
+    this.dragCompleted = false;
 
     // Selected IC for insertion
     this.selectedICForPlacement = null;
@@ -33,6 +36,8 @@ class DeldApp {
 
     // Truth Table mode: 'circuit' (Total Circuit) or 'ic' (Individual IC)
     this.truthTableMode = 'circuit';
+    this.suite = new DigitalLogicSuite();
+    this.currentSuiteTab = 'kmap';
 
     this.init();
   }
@@ -65,6 +70,8 @@ class DeldApp {
     this.setupToolbar();
     this.setupModals();
     this.setupPresets();
+    this.setupDigitalLogicSuite();
+    this.setupAutoWireSystem();
     this.setupShortcuts();
 
     // 4. Subscribe to Simulation updates
@@ -83,6 +90,12 @@ class DeldApp {
       const ttModal = document.getElementById('truth-table-modal');
       if (ttModal && !ttModal.classList.contains('hidden')) {
         this.updateTruthTableView();
+      }
+
+      // If Digital Logic Suite is open, refresh live logic suite
+      const lsModal = document.getElementById('logic-suite-modal');
+      if (lsModal && !lsModal.classList.contains('hidden')) {
+        this.updateLogicSuiteLive();
       }
     });
 
@@ -105,6 +118,7 @@ class DeldApp {
   // ==========================================
 
   setTool(tool) {
+    if (tool === 'select') tool = 'wire';
     this.activeTool = tool;
 
     // Reset wire in-progress if changing tools
@@ -113,8 +127,9 @@ class DeldApp {
     }
 
     // Update toolbar buttons active styling
-    document.querySelectorAll('.tool-btn').forEach(btn => {
-      if (btn.getAttribute('data-tool') === tool) {
+    document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+      const t = btn.getAttribute('data-tool');
+      if (t === tool || (tool === 'wire' && t === 'select')) {
         btn.classList.add('active');
       } else {
         btn.classList.remove('active');
@@ -128,6 +143,10 @@ class DeldApp {
       canvasContainer.style.cursor = 'crosshair';
     } else {
       canvasContainer.style.cursor = 'default';
+    }
+
+    if (tool !== 'hand') {
+      this.isPanning = false;
     }
 
     // Re-render wires with updated cursor styles
@@ -248,10 +267,150 @@ class DeldApp {
     this.storage.recordState();
   }
 
+  // ==========================================
+  // ABSOLUTE PIN SELECTION & CONNECTION
+  // ==========================================
+
+  selectPin(endpoint, coord) {
+    if (this.selectedPin) {
+      this.clearPinHighlight(this.selectedPin);
+    }
+
+    const normPin = String(endpoint.pin).trim();
+    const pinCoord = coord || this.board.getPinCoord(endpoint);
+    this.selectedPin = { comp: endpoint.comp, pin: normPin, coord: pinCoord };
+    this.wireStart = this.selectedPin;
+
+    // Highlight starting pin with vibrant cyan glow ring
+    this.setPinHighlight(this.selectedPin, true);
+
+    // Update bottom Pin Selection HUD
+    const hud = document.getElementById('pinSelectionHUD');
+    const nameSpan = document.getElementById('pinSelectionHUDLabel') || document.getElementById('pinSelectionName');
+    if (hud && nameSpan) {
+      const pinName = this.board.getHumanReadablePinName(this.selectedPin);
+      nameSpan.textContent = pinName;
+      hud.classList.remove('hidden');
+    }
+
+    const pinName = this.board.getHumanReadablePinName(this.selectedPin);
+    this.showToast(`Selected: ${pinName}. Click destination pin to connect.`, 'info');
+  }
+
+  deselectPin() {
+    if (this.selectedPin) {
+      this.clearPinHighlight(this.selectedPin);
+      this.selectedPin = null;
+    }
+    this.wireStart = null;
+    this.wireRenderer.clearPreview();
+
+    const hud = document.getElementById('pinSelectionHUD');
+    if (hud) {
+      hud.classList.add('hidden');
+    }
+  }
+
+  setPinHighlight(endpoint, active) {
+    const pinEl = document.querySelector(`.terminal-pin[data-comp="${endpoint.comp}"][data-pin="${endpoint.pin}"]`);
+    if (pinEl) {
+      const ring = pinEl.querySelector('.terminal-hover-ring');
+      if (active) {
+        pinEl.classList.add('wire-start-active');
+        if (ring) {
+          ring.setAttribute('opacity', '1');
+          ring.setAttribute('stroke', '#38bdf8');
+          ring.setAttribute('stroke-width', '3.5');
+        }
+      } else {
+        pinEl.classList.remove('wire-start-active');
+        if (ring) {
+          ring.setAttribute('opacity', '0');
+          ring.setAttribute('stroke', '#facc15');
+          ring.setAttribute('stroke-width', '2.5');
+        }
+      }
+    }
+  }
+
+  clearPinHighlight(endpoint) {
+    this.setPinHighlight(endpoint, false);
+  }
+
+  connectPins(from, to, customColor = null) {
+    const color = customColor || this.wireRenderer.currentColor;
+    const added = this.sim.addWire(from, to, color);
+
+    this.deselectPin();
+
+    if (added) {
+      this.storage.recordState();
+      if (!customColor) {
+        this.wireRenderer.advanceColor();
+        this.updateColorPickerActiveRing();
+      }
+      const fromName = this.board.getHumanReadablePinName(from);
+      const toName = this.board.getHumanReadablePinName(to);
+      this.showToast(`Connected ${fromName} → ${toName}!`, 'success');
+      this.updateAutoWireModalUI();
+      return true;
+    } else {
+      this.showToast('Connection already exists or pins invalid.', 'warning');
+      return false;
+    }
+  }
+
+  finishWireConnection(from, to) {
+    return this.connectPins(from, to);
+  }
+
+  startWireDrawing(endpoint, coord) {
+    this.selectPin(endpoint, coord);
+  }
+
+  cancelWireDrawing() {
+    this.deselectPin();
+  }
+
+  handlePinClick(endpoint, coord) {
+    if (this.activeTool === 'remove-wire' || this.activeTool === 'remove-ic') return;
+    if (this.activeTool === 'hand') {
+      this.setTool('wire');
+    }
+
+    if (this.dragCompleted) {
+      this.dragCompleted = false;
+      return;
+    }
+
+    const clicked = { comp: endpoint.comp, pin: String(endpoint.pin).trim() };
+
+    if (!this.selectedPin) {
+      // First pin clicked: Select it absolutely
+      this.selectPin(clicked, coord);
+    } else {
+      // Second pin clicked: Check if same pin clicked again (toggle off)
+      if (this.selectedPin.comp === clicked.comp && this.selectedPin.pin === clicked.pin) {
+        this.deselectPin();
+        this.showToast('Pin deselected.', 'info');
+        return;
+      }
+
+      // Absolute connection guaranteed: connect selectedPin to clicked pin
+      const from = { comp: this.selectedPin.comp, pin: this.selectedPin.pin };
+      const to = clicked;
+      this.connectPins(from, to);
+    }
+  }
+
   handlePinMouseDown(endpoint, coord, e) {
     if (this.activeTool === 'remove-wire' || (e && e.button !== 0)) return;
+    if (this.activeTool === 'hand') {
+      this.setTool('wire');
+    }
+    this.isPanning = false;
     this.pinDown = {
-      endpoint: { comp: endpoint.comp, pin: String(endpoint.pin) },
+      endpoint: { comp: endpoint.comp, pin: String(endpoint.pin).trim() },
       coord,
       startX: e ? e.clientX : 0,
       startY: e ? e.clientY : 0,
@@ -262,89 +421,22 @@ class DeldApp {
   handlePinMouseUp(endpoint, coord, e) {
     if (this.activeTool === 'remove-wire' || (e && e.button !== 0)) return;
 
-    // Check if this was an active drag from a different pin
     if (this.pinDown && this.pinDown.isDragging) {
+      // Geometric CTM nearest-pin snapping guarantees exact target identification
+      const targetPin = (e && e.clientX !== undefined)
+        ? (this.board.findPinNearScreenPoint(e.clientX, e.clientY) || endpoint)
+        : endpoint;
+
       const from = this.pinDown.endpoint;
-      const to = { comp: endpoint.comp, pin: String(endpoint.pin) };
+      const to = { comp: targetPin.comp, pin: String(targetPin.pin).trim() };
       if (from.comp !== to.comp || from.pin !== to.pin) {
-        this.finishWireConnection(from, to);
+        this.connectPins(from, to);
         this.dragCompleted = true;
       } else {
-        this.cancelWireDrawing();
+        this.deselectPin();
       }
     }
     this.pinDown = null;
-  }
-
-  handlePinClick(endpoint, coord) {
-    if (this.activeTool === 'remove-wire' || this.activeTool === 'remove-ic' || this.activeTool === 'hand') return;
-
-    // If drag gesture already completed the connection, ignore the subsequent click
-    if (this.dragCompleted) {
-      this.dragCompleted = false;
-      return;
-    }
-
-    const clicked = { comp: endpoint.comp, pin: String(endpoint.pin) };
-
-    if (!this.wireStart) {
-      // 1st Click: Start new wire
-      this.startWireDrawing(clicked, coord);
-      this.showToast(`Wire started from ${clicked.comp} pin ${clicked.pin}. Click destination pin to connect.`, 'info');
-    } else {
-      // 2nd Click: Finish wire
-      const from = { comp: this.wireStart.comp, pin: String(this.wireStart.pin) };
-      const to = clicked;
-
-      if (from.comp === to.comp && from.pin === to.pin) {
-        this.cancelWireDrawing();
-        this.showToast('Wire cancelled.', 'info');
-        return;
-      }
-
-      this.finishWireConnection(from, to);
-    }
-  }
-
-  startWireDrawing(endpoint, coord) {
-    if (this.wireStart) {
-      const prevPinEl = document.querySelector(`.terminal-pin[data-comp="${this.wireStart.comp}"][data-pin="${this.wireStart.pin}"]`);
-      if (prevPinEl) {
-        prevPinEl.classList.remove('wire-start-active');
-        const ring = prevPinEl.querySelector('.terminal-hover-ring');
-        if (ring) {
-          ring.setAttribute('opacity', '0');
-          ring.setAttribute('stroke', '#facc15');
-          ring.setAttribute('stroke-width', '2.5');
-        }
-      }
-    }
-    this.wireStart = { comp: endpoint.comp, pin: String(endpoint.pin), coord };
-
-    // Highlight starting pin with vibrant cyan glow
-    const pinEl = document.querySelector(`.terminal-pin[data-comp="${endpoint.comp}"][data-pin="${endpoint.pin}"]`);
-    if (pinEl) {
-      pinEl.classList.add('wire-start-active');
-      const ring = pinEl.querySelector('.terminal-hover-ring');
-      if (ring) {
-        ring.setAttribute('opacity', '1');
-        ring.setAttribute('stroke', '#38bdf8');
-        ring.setAttribute('stroke-width', '3.5');
-      }
-    }
-  }
-
-  finishWireConnection(from, to) {
-    const added = this.sim.addWire(from, to, this.wireRenderer.currentColor);
-    if (added) {
-      this.storage.recordState();
-      this.wireRenderer.advanceColor();
-      this.updateColorPickerActiveRing();
-      this.showToast('Connection established!', 'success');
-    } else {
-      this.showToast('Connection already exists or invalid.', 'warning');
-    }
-    this.cancelWireDrawing();
   }
 
   updateColorPickerActiveRing() {
@@ -358,23 +450,6 @@ class DeldApp {
         }
       });
     }
-  }
-
-  cancelWireDrawing() {
-    if (this.wireStart) {
-      const pinEl = document.querySelector(`.terminal-pin[data-comp="${this.wireStart.comp}"][data-pin="${this.wireStart.pin}"]`);
-      if (pinEl) {
-        pinEl.classList.remove('wire-start-active');
-        const ring = pinEl.querySelector('.terminal-hover-ring');
-        if (ring) {
-          ring.setAttribute('opacity', '0');
-          ring.setAttribute('stroke', '#facc15');
-          ring.setAttribute('stroke-width', '2.5');
-        }
-      }
-    }
-    this.wireStart = null;
-    this.wireRenderer.clearPreview();
   }
 
   handleWireClick(wireId) {
@@ -684,6 +759,9 @@ class DeldApp {
       preset.icBases.forEach(b => {
         this.sim.insertIC(b.id, b.icId);
       });
+      // CRITICAL: Update board dynamic elements immediately so IC chips are mounted
+      // and their pin coordinates are mapped in board.pinCoords BEFORE wires are added
+      this.board.updateDynamicElements();
     }
 
     // Connect wires
@@ -693,9 +771,20 @@ class DeldApp {
       });
     }
 
+    // Turn Power ON automatically so user can simulate immediately
+    this.sim.setPower(true);
+    this.board.updateDynamicElements();
+    this.wireRenderer.renderWires(
+      this.sim.wires,
+      (endpoint) => this.board.getPinCoord(endpoint),
+      this.sim.power,
+      this.activeTool,
+      (wireId) => this.handleWireClick(wireId)
+    );
+
     this.setCircuitName(preset.title);
     this.storage.recordState();
-    this.showToast(`Loaded "${preset.title}"! Turn Power ON to run.`, 'success');
+    this.showToast(`Loaded "${preset.title}" with ICs and wiring ready!`, 'success');
   }
 
   // ==========================================
@@ -1273,6 +1362,24 @@ class DeldApp {
     const container = document.getElementById('canvasContainer');
     const editor = document.getElementById('editor');
 
+    // Clicking empty canvas deselects active pin selection
+    container.addEventListener('click', (e) => {
+      if (
+        !e.target.closest('.terminal-pin') &&
+        !e.target.closest('.input-toggle-switch') &&
+        !e.target.closest('.master-power-btn') &&
+        !e.target.closest('.manual-pulse-box') &&
+        !e.target.closest('.chip-remove-btn') &&
+        !e.target.closest('.exact-ic-base') &&
+        !e.target.closest('.mounted-ic-overlay') &&
+        !e.target.closest('.wire-path')
+      ) {
+        if (this.selectedPin && !this.dragCompleted) {
+          this.deselectPin();
+        }
+      }
+    });
+
     // Pan via Mouse Drag
     container.addEventListener('mousedown', (e) => {
       // Do not initiate pan if clicking on interactive board components
@@ -1296,20 +1403,25 @@ class DeldApp {
     });
 
     window.addEventListener('mousemove', (e) => {
+      // If mouse is pressed on a pin, prioritize wire dragging over canvas panning
+      if (this.pinDown) {
+        this.isPanning = false;
+        if (!this.pinDown.isDragging) {
+          const dist = Math.hypot(e.clientX - this.pinDown.startX, e.clientY - this.pinDown.startY);
+          if (dist > 3) {
+            this.pinDown.isDragging = true;
+            if (!this.selectedPin) {
+              this.selectPin(this.pinDown.endpoint, this.pinDown.coord);
+            }
+          }
+        }
+      }
+
       if (this.isPanning) {
         this.panX = e.clientX - this.panStart.x;
         this.panY = e.clientY - this.panStart.y;
         this.applyTransform();
         return;
-      }
-
-      // If mouse is pressed on a pin and moves beyond 5px threshold, activate drag mode
-      if (this.pinDown && !this.pinDown.isDragging) {
-        const dist = Math.hypot(e.clientX - this.pinDown.startX, e.clientY - this.pinDown.startY);
-        if (dist > 5) {
-          this.pinDown.isDragging = true;
-          this.startWireDrawing(this.pinDown.endpoint, this.pinDown.coord);
-        }
       }
 
       if (this.wireStart) {
@@ -1334,33 +1446,32 @@ class DeldApp {
       // Check for drag-to-connect finish on window mouseup
       if (this.pinDown) {
         if (this.pinDown.isDragging) {
-          const targetPinEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('.terminal-pin');
-          if (targetPinEl) {
-            const toComp = targetPinEl.getAttribute('data-comp');
-            const toPin = targetPinEl.getAttribute('data-pin');
-            if (toComp && toPin && (toComp !== this.pinDown.endpoint.comp || toPin !== this.pinDown.endpoint.pin)) {
-              this.finishWireConnection(this.pinDown.endpoint, { comp: toComp, pin: toPin });
-              this.dragCompleted = true;
-            } else {
-              this.cancelWireDrawing();
-            }
+          // Geometric CTM nearest-pin mapping guarantees exact target identification
+          const targetPin = this.board.findPinNearScreenPoint(e.clientX, e.clientY);
+          let toComp = null;
+          let toPin = null;
+
+          if (targetPin) {
+            toComp = targetPin.comp;
+            toPin = String(targetPin.pin).trim();
           } else {
-            this.cancelWireDrawing();
+            // Fallback to DOM elementFromPoint
+            const targetPinEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('.terminal-pin');
+            if (targetPinEl) {
+              toComp = targetPinEl.getAttribute('data-comp');
+              toPin = targetPinEl.getAttribute('data-pin');
+            }
           }
+
+          if (toComp && toPin && (toComp !== this.pinDown.endpoint.comp || toPin !== this.pinDown.endpoint.pin)) {
+            this.connectPins(this.pinDown.endpoint, { comp: toComp, pin: toPin });
+            this.dragCompleted = true;
+          } else if (toComp && toPin && toComp === this.pinDown.endpoint.comp && toPin === this.pinDown.endpoint.pin) {
+            this.deselectPin();
+          }
+          // Note: If dropped in empty space, keep selectedPin active so user can click destination!
         }
         this.pinDown = null;
-      }
-    });
-
-    // Cancel in-progress wire when clicking empty space
-    container.addEventListener('click', (e) => {
-      if (this.dragCompleted) {
-        this.dragCompleted = false;
-        return;
-      }
-      if (this.wireStart && !e.target.closest('.terminal-pin')) {
-        this.cancelWireDrawing();
-        this.showToast('Wire connection canceled.', 'info');
       }
     });
 
@@ -1459,9 +1570,878 @@ class DeldApp {
       } else if (e.key === 'Escape') {
         this.cancelWireDrawing();
         document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.add('hidden'));
+      } else if (e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'v') {
+        this.setTool('wire');
+      } else if (e.key.toLowerCase() === 'h') {
+        this.setTool('hand');
       }
     });
   }
+
+
+  // ==========================================
+  // DIGITAL LOGIC SUITE (6 TOOLS) INTEGRATION
+  // ==========================================
+
+  setupDigitalLogicSuite() {
+    const floatingBtn = document.getElementById('floatingLogicSuiteBtn');
+    const navBtn = document.getElementById('navLogicSuiteBtn');
+    const dropdown = document.getElementById('logicSuiteDropdown');
+    const modal = document.getElementById('logic-suite-modal');
+
+    // Toggle dropdown from floating toolbar lightbulb
+    if (floatingBtn && dropdown) {
+      floatingBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = dropdown.classList.contains('hidden');
+        dropdown.classList.toggle('hidden', !isHidden);
+      });
+    }
+
+    // Toggle dropdown from navbar
+    if (navBtn && dropdown) {
+      navBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = dropdown.classList.contains('hidden');
+        dropdown.classList.toggle('hidden', !isHidden);
+      });
+    }
+
+    // Dropdown items click handling
+    if (dropdown) {
+      dropdown.querySelectorAll('[data-tool-action]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const action = btn.getAttribute('data-tool-action');
+          dropdown.classList.add('hidden');
+          this.openDigitalLogicSuite(action);
+        });
+      });
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', (e) => {
+        if (
+          !dropdown.contains(e.target) &&
+          (!floatingBtn || !floatingBtn.contains(e.target)) &&
+          (!navBtn || !navBtn.contains(e.target))
+        ) {
+          dropdown.classList.add('hidden');
+        }
+      });
+    }
+
+    // Live Kit Sync Toggle button
+    const liveToggleBtn = document.getElementById('suiteLiveSyncToggle');
+    const liveDotPing = document.getElementById('suiteLiveDotPing');
+    const liveDot = document.getElementById('suiteLiveDot');
+
+    if (liveToggleBtn) {
+      liveToggleBtn.addEventListener('click', () => {
+        this.suite.liveSync = !this.suite.liveSync;
+        if (this.suite.liveSync) {
+          liveToggleBtn.textContent = 'LIVE ON';
+          liveToggleBtn.className = 'text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-xs cursor-pointer';
+          if (liveDot) liveDot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500';
+          if (liveDotPing) liveDotPing.classList.remove('hidden');
+          this.showToast('Live Kit Sync Enabled: Analyzing real trainer kit circuit in real-time!', 'success');
+        } else {
+          liveToggleBtn.textContent = 'LIVE OFF';
+          liveToggleBtn.className = 'text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-all shadow-xs cursor-pointer';
+          if (liveDot) liveDot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-500';
+          if (liveDotPing) liveDotPing.classList.add('hidden');
+          this.showToast('Live Kit Sync Paused: Custom Design / Edit Mode active.', 'info');
+        }
+        this.updateLogicSuiteLive();
+      });
+    }
+
+    // Counter Live Clock Stepper button
+    const counterStepBtn = document.getElementById('counterStepClockBtn');
+    if (counterStepBtn) {
+      counterStepBtn.addEventListener('click', () => {
+        this.stepLiveCounter();
+      });
+    }
+
+    // FSM Live Clock Stepper button
+    const fsmStepBtn = document.getElementById('fsmStepClockBtn');
+    if (fsmStepBtn) {
+      fsmStepBtn.addEventListener('click', () => {
+        this.stepLiveFSM();
+      });
+    }
+
+    // Target Output selector dropdown
+    const outputSelect = document.getElementById('suiteOutputSelect');
+    if (outputSelect) {
+      outputSelect.addEventListener('change', (e) => {
+        this.suiteTargetOutputLed = Number(e.target.value);
+        this.updateLogicSuiteLive();
+      });
+    }
+
+    // Modal navigation tab switching
+    if (modal) {
+      modal.querySelectorAll('.suite-tab-btn[data-suite-tab]').forEach(tabBtn => {
+        tabBtn.addEventListener('click', () => {
+          const tab = tabBtn.getAttribute('data-suite-tab');
+          this.setSuiteTab(tab);
+        });
+      });
+
+      // Solve -> Build button
+      const buildBtn = document.getElementById('suiteBuildCircuitBtn');
+      if (buildBtn) {
+        buildBtn.addEventListener('click', () => {
+          this.handleSuiteBuild();
+        });
+      }
+
+      // K-Map variable buttons
+      modal.querySelectorAll('.kmap-var-btn[data-kmap-vars]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const vars = Number(btn.getAttribute('data-kmap-vars'));
+          this.suite.setVarsCount(vars);
+          modal.querySelectorAll('.kmap-var-btn').forEach(b => {
+            b.className = 'kmap-var-btn px-3 py-1 rounded-lg text-slate-600 hover:text-slate-900 transition-colors';
+          });
+          btn.className = 'kmap-var-btn px-3 py-1 rounded-lg bg-white text-amber-600 shadow-xs font-bold transition-colors';
+          this.renderKMapTab();
+        });
+      });
+
+      // K-Map Clear & Fill buttons
+      document.getElementById('kmapClearBtn')?.addEventListener('click', () => {
+        this.suite.minterms.clear();
+        this.suite.dontCares.clear();
+        this.renderKMapTab();
+      });
+
+      document.getElementById('kmapFillOnesBtn')?.addEventListener('click', () => {
+        const total = 1 << this.suite.varsCount;
+        this.suite.dontCares.clear();
+        for (let i = 0; i < total; i++) this.suite.minterms.add(i);
+        this.renderKMapTab();
+      });
+
+      // Copy SOP button
+      document.getElementById('copyKMapSOPBtn')?.addEventListener('click', () => {
+        const qm = this.suite.solveQuineMcCluskey();
+        navigator.clipboard.writeText(qm.sop);
+        this.showToast(`Copied SOP: F = ${qm.sop}`, 'success');
+      });
+
+      // Algebraic Presets
+      modal.querySelectorAll('.algebraic-preset-btn[data-preset]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const preset = btn.getAttribute('data-preset');
+          if (preset === 'consensus') {
+            this.suite.setVarsCount(3);
+            this.suite.minterms = new Set([3, 5, 6, 7]); // AB + A'C + BC
+          } else if (preset === 'absorption') {
+            this.suite.setVarsCount(2);
+            this.suite.minterms = new Set([2, 3]); // A + AB = A
+          } else if (preset === 'demorgan') {
+            this.suite.setVarsCount(2);
+            this.suite.minterms = new Set([0]); // (A+B)' = A'B'
+          }
+          this.renderKMapTab();
+          this.renderSimplifierTab();
+        });
+      });
+
+      // Counter selects
+      const counterSeq = document.getElementById('counterSeqSelect');
+      const counterFF = document.getElementById('counterFFSelect');
+      if (counterSeq) counterSeq.addEventListener('change', () => this.renderCounterTab());
+      if (counterFF) counterFF.addEventListener('change', () => this.renderCounterTab());
+
+      // FSM select
+      const fsmSelect = document.getElementById('fsmPresetSelect');
+      if (fsmSelect) fsmSelect.addEventListener('change', () => this.renderFSMTab());
+    }
+  }
+
+  openDigitalLogicSuite(preferredTool = 'kmap') {
+    const modal = document.getElementById('logic-suite-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    this.setSuiteTab(preferredTool);
+    this.updateLogicSuiteLive();
+  }
+
+  setSuiteTab(tabId) {
+    this.currentSuiteTab = tabId;
+    const modal = document.getElementById('logic-suite-modal');
+    if (!modal) return;
+
+    // Update active tab buttons
+    modal.querySelectorAll('.suite-tab-btn').forEach(btn => {
+      const isCurrent = btn.getAttribute('data-suite-tab') === tabId;
+      if (isCurrent) {
+        btn.className = 'suite-tab-btn active px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-amber-400 border-amber-400 bg-slate-800/80';
+      } else {
+        btn.className = 'suite-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200';
+      }
+    });
+
+    // Update tool badge
+    const badge = document.getElementById('suiteActiveToolBadge');
+    if (badge) {
+      const titles = {
+        'kmap': 'K-Map Solver',
+        'truth-table': 'Truth Table & Waveform',
+        'simplifier': 'Algebraic Simplifier',
+        'circuit': 'Circuit Diagram',
+        'counter': 'Counter Designer',
+        'fsm': 'FSM Designer'
+      };
+      badge.textContent = titles[tabId] || 'Logic Suite';
+    }
+
+    // Hide all panels, show active panel
+    modal.querySelectorAll('.suite-tab-panel').forEach(panel => {
+      panel.classList.add('hidden');
+    });
+    const activePanel = document.getElementById(`suiteTabPanel_${tabId}`);
+    if (activePanel) activePanel.classList.remove('hidden');
+
+    // Trigger tab specific rendering or live update
+    if (this.suite && this.suite.liveSync) {
+      this.updateLogicSuiteLive();
+    } else {
+      if (tabId === 'kmap') this.renderKMapTab();
+      else if (tabId === 'truth-table') this.renderTruthTableTab();
+      else if (tabId === 'simplifier') this.renderSimplifierTab();
+      else if (tabId === 'circuit') this.renderCircuitTab();
+      else if (tabId === 'counter') this.renderCounterTab();
+      else if (tabId === 'fsm') this.renderFSMTab();
+    }
+  }
+
+  // ==========================================
+  // LIVE LOGIC SUITE REAL-TIME SYNC & RENDERERS
+  // ==========================================
+
+  updateLogicSuiteLive() {
+    const modal = document.getElementById('logic-suite-modal');
+    if (!modal || modal.classList.contains('hidden')) return;
+
+    if (this.suite.liveSync) {
+      const circuitData = this.sim.generateCircuitTruthTable();
+
+      if (this.suiteTargetOutputLed === undefined || !circuitData.outputs.includes(this.suiteTargetOutputLed)) {
+        this.suiteTargetOutputLed = circuitData.outputs.length > 0 ? circuitData.outputs[0] : 0;
+      }
+      this.suite.syncWithCircuit(circuitData, this.suiteTargetOutputLed);
+
+      // Update Live Circuit Banner
+      const banner = document.getElementById('suiteLiveCircuitBanner');
+      const summaryEl = document.getElementById('suiteLiveCircuitSummary');
+      const inputStateEl = document.getElementById('suiteLiveInputState');
+      const outputStateEl = document.getElementById('suiteLiveOutputState');
+      const outputWrapper = document.getElementById('suiteOutputSelectWrapper');
+      const outputSelect = document.getElementById('suiteOutputSelect');
+
+      if (banner && summaryEl) {
+        if (circuitData.inputs.length > 0 && circuitData.outputs.length > 0) {
+          banner.className = 'px-6 py-2 bg-emerald-950/70 border-b border-emerald-800/60 flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-emerald-200 select-none';
+          const activeICNames = circuitData.activeICs.map(ic => `${ic.icId} on Base ${ic.baseIndex + 1}`).join(', ') || 'Direct Connection';
+          summaryEl.textContent = `⚡ Live Circuit: ${circuitData.inputs.map(s => 'SW ' + s).join(', ')} ➔ [${activeICNames}] ➔ OUT ${this.suiteTargetOutputLed}`;
+          
+          if (inputStateEl) {
+            const inStrs = circuitData.inputs.map(s => `SW${s}=${this.sim.switches[s] || 0}`);
+            inputStateEl.textContent = `Live Inputs: ${inStrs.join(', ')}`;
+          }
+
+          if (outputWrapper && outputSelect) {
+            outputWrapper.classList.remove('hidden');
+            const currentVal = String(this.suiteTargetOutputLed);
+            const optionsHtml = circuitData.outputs.map(out => {
+              return `<option value="${out}" ${String(out) === currentVal ? 'selected' : ''}>OUT ${out}</option>`;
+            }).join('');
+            if (outputSelect.innerHTML !== optionsHtml) {
+              outputSelect.innerHTML = optionsHtml;
+            }
+            outputSelect.value = currentVal;
+          }
+
+          if (outputStateEl) {
+            const outVal = this.sim.leds[this.suiteTargetOutputLed] || 0;
+            outputStateEl.textContent = `Live Output: OUT${this.suiteTargetOutputLed}=${outVal} (${outVal ? 'HIGH' : 'LOW'})`;
+            outputStateEl.className = outVal ? 'bg-emerald-900 px-2 py-0.5 rounded border border-emerald-500 font-extrabold text-emerald-300 shadow-xs' : 'bg-slate-800 px-2 py-0.5 rounded border border-slate-700 font-semibold text-slate-400';
+          }
+        } else {
+          banner.className = 'px-6 py-2 bg-amber-950/70 border-b border-amber-800/60 flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-amber-200 select-none';
+          summaryEl.textContent = circuitData.emptyReason || 'No complete circuit detected between switches and LEDs.';
+          if (inputStateEl) inputStateEl.textContent = 'Custom Design Mode';
+          if (outputWrapper) outputWrapper.classList.add('hidden');
+          if (outputStateEl) outputStateEl.textContent = 'Solve → Build on Kit below';
+        }
+      }
+    }
+
+    // Refresh currently open tab
+    if (this.currentSuiteTab === 'kmap') this.renderKMapTab();
+    else if (this.currentSuiteTab === 'truth-table') this.renderTruthTableTab();
+    else if (this.currentSuiteTab === 'simplifier') this.renderSimplifierTab();
+    else if (this.currentSuiteTab === 'circuit') this.renderCircuitTab();
+    else if (this.currentSuiteTab === 'counter') this.renderCounterTab();
+    else if (this.currentSuiteTab === 'fsm') this.renderFSMTab();
+  }
+
+  // --- K-MAP TAB RENDERER (LIVE) ---
+  renderKMapTab() {
+    const container = document.getElementById('kmapGridContainer');
+    const mintermsEl = document.getElementById('kmapMintermsSummary');
+    const sopEl = document.getElementById('kmapMinimizedSOP');
+    const gateBadge = document.getElementById('kmapGateCountBadge');
+    const groupsListEl = document.getElementById('kmapGroupsList');
+    const groupCountEl = document.getElementById('kmapGroupCount');
+    const qmStepsEl = document.getElementById('kmapQMSteps');
+    if (!container) return;
+
+    const numVars = this.suite.varsCount;
+    const grid = this.suite.getKMapGridConfig(numVars);
+    const qm = this.suite.solveQuineMcCluskey();
+    const liveMinterm = this.suite.liveRowIndex;
+
+    // 1. Render interactive table with live active cell highlight
+    let tableHtml = '<table class="kmap-grid-table select-none">';
+    
+    // Top column header
+    tableHtml += '<tr><th class="p-2 text-xs font-mono font-bold text-slate-400">' + grid.rowVars.join('') + ' \ ' + grid.colVars.join('') + '</th>';
+    grid.colLabels.forEach(cl => {
+      tableHtml += `<th class="p-2 text-xs font-mono font-bold text-slate-700 text-center">${cl}</th>`;
+    });
+    tableHtml += '</tr>';
+
+    // Grid rows
+    grid.rowLabels.forEach((rl, rIdx) => {
+      tableHtml += `<tr><th class="p-2 text-xs font-mono font-bold text-slate-700 text-right pr-3">${rl}</th>`;
+      grid.colLabels.forEach((cl, cIdx) => {
+        const minterm = grid.cells[rIdx][cIdx];
+        const val = this.suite.getCellState(minterm);
+        const isLiveCell = (minterm === liveMinterm);
+
+        let cellClass = 'kmap-cell relative';
+        if (val === 1) cellClass += ' state-1';
+        else if (val === 'X') cellClass += ' state-x';
+        if (isLiveCell) cellClass += ' ring-4 ring-emerald-500 shadow-lg scale-105 z-10 bg-emerald-100/50';
+
+        tableHtml += `
+          <td>
+            <div class="${cellClass}" data-minterm="${minterm}" title="${isLiveCell ? 'LIVE: Current switch inputs match this cell!' : ''}">
+              <span class="kmap-cell-idx">m${minterm}</span>
+              ${isLiveCell ? '<span class="absolute top-1 right-1 px-1 py-0.2 rounded text-[8px] font-black bg-emerald-500 text-white animate-pulse">LIVE</span>' : ''}
+              <span class="kmap-val">${val}</span>
+            </div>
+          </td>
+        `;
+      });
+      tableHtml += '</tr>';
+    });
+    tableHtml += '</table>';
+    container.innerHTML = tableHtml;
+
+    // Bind cell clicks (toggles cell and pauses live sync if user custom edits)
+    container.querySelectorAll('.kmap-cell[data-minterm]').forEach(cell => {
+      cell.addEventListener('click', () => {
+        const m = Number(cell.getAttribute('data-minterm'));
+        if (this.suite.liveSync) {
+          this.suite.liveSync = false;
+          const liveToggleBtn = document.getElementById('suiteLiveSyncToggle');
+          if (liveToggleBtn) {
+            liveToggleBtn.textContent = 'LIVE OFF';
+            liveToggleBtn.className = 'text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-all shadow-xs cursor-pointer';
+          }
+          this.showToast('Paused Live Sync for manual K-Map editing. Click LIVE ON to re-sync.', 'info');
+        }
+        this.suite.toggleCell(m);
+        this.renderKMapTab();
+      });
+    });
+
+    // 2. Update stats and equations
+    const mintermArr = Array.from(this.suite.minterms).sort((a,b) => a-b);
+    if (mintermsEl) mintermsEl.textContent = mintermArr.length ? `Σ m(${mintermArr.join(', ')})` : '0 minterms';
+    const outName = this.suite.outputLedName || 'F';
+    if (sopEl) sopEl.textContent = `${outName} = ${qm.sop || '0'}`;
+    if (gateBadge) gateBadge.textContent = `Required Gates: ${qm.gateCount}`;
+    if (groupCountEl) groupCountEl.textContent = `${qm.terms.length} Group${qm.terms.length === 1 ? '' : 's'}`;
+
+    // 3. Render Prime Implicant groups
+    if (groupsListEl) {
+      if (qm.terms.length === 0) {
+        groupsListEl.innerHTML = '<div class="text-slate-400 italic text-center py-2">No active groups</div>';
+      } else {
+        groupsListEl.innerHTML = qm.terms.map((t) => `
+          <div class="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${t.color}"></span>
+              <span class="font-bold text-slate-800 font-mono">${t.term}</span>
+            </div>
+            <span class="font-mono text-[11px] text-slate-500">m(${t.minterms.join(', ')})</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    // 4. Quine-McCluskey Steps
+    if (qmStepsEl) {
+      qmStepsEl.innerHTML = qm.qmSteps.map(step => `<div>• ${step}</div>`).join('');
+    }
+  }
+
+  // --- TRUTH TABLE & WAVEFORM TAB RENDERER (LIVE) ---
+  renderTruthTableTab() {
+    const tableContainer = document.getElementById('suiteTruthTableContainer');
+    const stdEl = document.getElementById('ttStandardForms');
+    const canvas = document.getElementById('suiteWaveformCanvas');
+    if (!tableContainer) return;
+
+    const data = this.suite.generateTruthTableData();
+    const liveRowIndex = data.liveRowIndex !== undefined ? data.liveRowIndex : -1;
+
+    if (stdEl) {
+      stdEl.textContent = `${data.sopStandard} • ${data.posStandard}`;
+    }
+
+    const outputHeader = data.outputName || 'F (Output)';
+    const hasMultipleOutputs = Boolean(data.allOutputLeds && data.allOutputLeds.length > 1);
+    const activeTargetLed = data.outputLed !== undefined ? data.outputLed : (data.allOutputLeds && data.allOutputLeds[0]);
+
+    const tableHeadersHtml = hasMultipleOutputs
+      ? data.allOutputLeds.map(led => {
+          const isActive = led === activeTargetLed;
+          return `
+            <th class="px-3 py-2 text-center border-l border-slate-200 cursor-pointer transition-colors ${isActive ? 'bg-emerald-100/90 text-emerald-800 font-extrabold shadow-xs' : 'text-slate-600 hover:bg-slate-200/70 font-bold'}"
+                data-output-select="${led}" title="Click to solve this output in K-Map & Simplifier">
+              OUT ${led} ${isActive ? '<span class="text-[9px] bg-emerald-600 text-white px-1 py-0.2 rounded ml-1">TARGET</span>' : ''}
+            </th>
+          `;
+        }).join('')
+      : `<th class="px-3 py-2 text-emerald-700 font-bold">${outputHeader}</th>`;
+
+    tableContainer.innerHTML = `
+      <div class="text-[11px] text-slate-500 px-3 py-1.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+        <span>💡 Click any row to test on trainer kit in real-time</span>
+        <span class="font-bold text-emerald-700">Live Active Row Highlighted</span>
+      </div>
+      <table class="w-full text-left text-xs font-mono border-collapse">
+        <thead class="bg-slate-100 border-b border-slate-200 sticky top-0">
+          <tr>
+            <th class="px-3 py-2 text-slate-500">Row</th>
+            ${data.vars.map(v => `<th class="px-3 py-2 text-sky-700">${v}</th>`).join('')}
+            ${tableHeadersHtml}
+            <th class="px-3 py-2 text-slate-500 text-center">Kit Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.rows.map(r => {
+            const isLive = r.isLive || (r.index === liveRowIndex);
+            const rowClass = isLive
+              ? 'bg-emerald-100/90 border-l-4 border-l-emerald-600 font-extrabold text-emerald-950 shadow-xs'
+              : 'border-b border-slate-100 hover:bg-slate-50 cursor-pointer';
+
+            const outputCellsHtml = hasMultipleOutputs
+              ? data.allOutputLeds.map(led => {
+                  const val = r.allOutputs ? r.allOutputs[led] : (led === activeTargetLed ? r.output : 0);
+                  const isTarget = led === activeTargetLed;
+                  return `
+                    <td class="px-3 py-2 font-bold text-center border-l border-slate-100 ${isTarget ? 'bg-emerald-50/50' : ''} ${val === 1 ? 'text-emerald-700' : 'text-slate-400'}">
+                      ${val}
+                      ${isTarget && isLive ? '<span class="ml-1.5 px-1 py-0.2 rounded bg-emerald-600 text-white font-black text-[8px] animate-pulse">LIVE</span>' : ''}
+                    </td>
+                  `;
+                }).join('')
+              : `
+                <td class="px-3 py-2 font-bold ${r.output === 1 ? 'text-emerald-700' : (r.output === 'X' ? 'text-blue-500' : 'text-slate-400')}">
+                  ${r.output}
+                  ${isLive ? '<span class="ml-2 px-1.5 py-0.5 rounded bg-emerald-600 text-white font-black text-[9px] animate-pulse">▶ LIVE</span>' : ''}
+                </td>
+              `;
+
+            return `
+              <tr class="${rowClass} suite-live-tt-row" data-row-index="${r.index}" title="Click to test this row on trainer kit">
+                <td class="px-3 py-2 text-slate-500 font-bold">m${r.index}</td>
+                ${r.inputs.map(b => `<td class="px-3 py-2 font-bold ${b ? 'text-sky-600' : 'text-slate-400'}">${b}</td>`).join('')}
+                ${outputCellsHtml}
+                <td class="px-3 py-2 text-center">
+                  <button type="button" class="px-2 py-0.5 rounded text-[10px] font-bold text-sky-700 hover:bg-sky-100 transition-colors">
+                    ${isLive ? 'Active' : 'Apply'}
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Click output headers to switch active target output
+    tableContainer.querySelectorAll('[data-output-select]').forEach(th => {
+      th.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const selected = Number(th.getAttribute('data-output-select'));
+        this.suiteTargetOutputLed = selected;
+        this.updateLogicSuiteLive();
+      });
+    });
+
+    // Bind row clicks to set kit switches in real-time
+    tableContainer.querySelectorAll('.suite-live-tt-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const rowIdx = Number(row.getAttribute('data-row-index'));
+        this.applyTruthTableRowToKit(rowIdx);
+      });
+    });
+
+    // Draw Logic Analyzer Waveform on Canvas with Live Cursor
+    if (canvas && canvas.getContext) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Dark background
+      ctx.fillStyle = '#0b1329';
+      ctx.fillRect(0, 0, w, h);
+
+      const numSteps = data.rows.length;
+      const colWidth = (w - 70) / numSteps;
+      const outSignals = hasMultipleOutputs
+        ? data.allOutputLeds.map(led => `OUT ${led}`)
+        : [outputHeader];
+      const signals = [...data.vars, ...outSignals];
+      const rowHeight = (h - 30) / signals.length;
+
+      signals.forEach((sig, idx) => {
+        const yBase = 25 + idx * rowHeight;
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(sig, 55, yBase + 15);
+
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(65, yBase + rowHeight);
+        ctx.lineTo(w - 10, yBase + rowHeight);
+        ctx.stroke();
+
+        const isInput = idx < data.vars.length;
+        ctx.strokeStyle = !isInput ? '#10b981' : (idx % 2 === 0 ? '#38bdf8' : '#a855f7');
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+
+        let lastVal = null;
+        for (let s = 0; s < numSteps; s++) {
+          let val;
+          if (isInput) {
+            val = data.rows[s].inputs[idx];
+          } else {
+            const outLedIndex = idx - data.vars.length;
+            if (hasMultipleOutputs) {
+              const outLed = data.allOutputLeds[outLedIndex];
+              val = data.rows[s].allOutputs ? (data.rows[s].allOutputs[outLed] || 0) : 0;
+            } else {
+              val = data.rows[s].output === 1 ? 1 : 0;
+            }
+          }
+          const xStart = 65 + s * colWidth;
+          const xEnd = xStart + colWidth;
+          const yHigh = yBase + 4;
+          const yLow = yBase + rowHeight - 8;
+          const yCur = val ? yHigh : yLow;
+
+          if (s === 0) {
+            ctx.moveTo(xStart, yCur);
+          } else if (lastVal !== val) {
+            ctx.lineTo(xStart, yCur);
+          }
+          ctx.lineTo(xEnd, yCur);
+          lastVal = val;
+        }
+        ctx.stroke();
+      });
+
+      // Time step headers
+      ctx.fillStyle = '#64748b';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      for (let s = 0; s < numSteps; s++) {
+        const x = 65 + s * colWidth + colWidth / 2;
+        ctx.fillText(`t${s}`, x, 14);
+      }
+
+      // Draw Live Playhead Cursor
+      if (liveRowIndex >= 0 && liveRowIndex < numSteps) {
+        const liveX = 65 + liveRowIndex * colWidth + colWidth / 2;
+
+        // Glowing live vertical line
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(liveX, 16);
+        ctx.lineTo(liveX, h - 10);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Live Marker Badge at top
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.arc(liveX, 16, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#10b981';
+        ctx.font = 'bold 9px monospace';
+        ctx.fillText('LIVE', liveX, 10);
+      }
+    }
+  }
+
+  applyTruthTableRowToKit(rowIndex) {
+    if (this.suite.liveCircuitInfo && this.suite.liveCircuitInfo.inputs) {
+      const activeSwitches = this.suite.liveCircuitInfo.inputs;
+      const N = activeSwitches.length;
+      activeSwitches.forEach((swNum, bitPos) => {
+        const shift = N - 1 - bitPos;
+        const bitVal = (rowIndex >> shift) & 1;
+        this.sim.switches[swNum] = bitVal;
+      });
+      this.sim.power = true;
+      this.storage.recordState();
+      this.sim.evaluate();
+      this.board.updateDynamicElements();
+      this.showToast(`Set kit switches to row m${rowIndex}!`, 'success');
+      this.updateLogicSuiteLive();
+    }
+  }
+
+  // --- COUNTER DESIGNER TAB RENDERER (LIVE) ---
+  renderCounterTab() {
+    const seqSelect = document.getElementById('counterSeqSelect');
+    const ffSelect = document.getElementById('counterFFSelect');
+    const lockoutText = document.getElementById('counterLockoutText');
+    const excitationList = document.getElementById('counterExcitationList');
+    const transitionsList = document.getElementById('counterTransitionsList');
+    const stateBadge = document.getElementById('counterLiveStateBadge');
+
+    const res = this.suite.designCounter({
+      sequenceType: seqSelect?.value || 'bcd',
+      flipFlop: ffSelect?.value || 'D'
+    });
+
+    const curIdx = this.suite.counterCurrentIndex % res.seq.length;
+    const curVal = res.seq[curIdx];
+    const curBin = curVal.toString(2).padStart(res.numBits, '0');
+    const nextVal = res.seq[(curIdx + 1) % res.seq.length];
+    const nextBin = nextVal.toString(2).padStart(res.numBits, '0');
+
+    if (stateBadge) {
+      stateBadge.textContent = `Live State: S${curVal} (${curBin})`;
+    }
+
+    if (lockoutText) lockoutText.textContent = res.lockoutNote;
+
+    if (excitationList) {
+      excitationList.innerHTML = res.excitationEquations.map(eq => `
+        <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+          <span class="font-bold text-slate-800">${eq.flipFlop}:</span>
+          <span class="text-sky-700 font-bold">${eq.equation}</span>
+        </div>
+      `).join('');
+    }
+
+    if (transitionsList) {
+      transitionsList.innerHTML = res.transitions.map((t) => {
+        const isCurrent = (t.from === curVal);
+        const cardClass = isCurrent
+          ? 'p-2.5 bg-emerald-50 border-2 border-emerald-500 rounded-xl flex items-center justify-between shadow-xs font-bold text-emerald-950'
+          : 'p-2 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between';
+
+        return `
+          <div class="${cardClass}">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded ${isCurrent ? 'bg-emerald-600 text-white' : 'bg-sky-100 text-sky-800'} font-bold">S${t.from}</span>
+              <span class="text-slate-500">(${t.fromBin})</span>
+              ${isCurrent ? '<span class="text-[10px] text-emerald-600 font-extrabold animate-pulse">◀ ACTIVE</span>' : ''}
+            </div>
+            <span class="text-slate-400 font-bold">→</span>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">S${t.to}</span>
+              <span class="text-slate-500">(${t.toBin})</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  stepLiveCounter() {
+    this.suite.counterCurrentIndex = (this.suite.counterCurrentIndex + 1);
+    this.sim.setManualPulse(true);
+    setTimeout(() => this.sim.setManualPulse(false), 150);
+    this.renderCounterTab();
+    this.showToast('Clock pulse fired: Counter advanced to next state!', 'info');
+  }
+
+  // --- FSM DESIGNER TAB RENDERER (LIVE) ---
+  renderFSMTab() {
+    const presetSelect = document.getElementById('fsmPresetSelect');
+    const diagramContainer = document.getElementById('fsmDiagramContainer');
+    const tableEl = document.getElementById('fsmTransitionsTable');
+    const eqList = document.getElementById('fsmEquationsList');
+    const stateBadge = document.getElementById('fsmLiveStateBadge');
+    const inputBadge = document.getElementById('fsmLiveInputBadge');
+
+    const fsm = this.suite.designFSM(presetSelect?.value || 'seq101');
+    const curState = this.suite.fsmCurrentState || 'S0';
+
+    // Current input bit from SW 0 on kit
+    const curInputBit = this.sim.switches[0] || 0;
+
+    if (stateBadge) stateBadge.textContent = `Live State: ${curState}`;
+    if (inputBadge) inputBadge.textContent = `Input X: SW0=${curInputBit}`;
+
+    if (diagramContainer) {
+      diagramContainer.innerHTML = `
+        <svg class="w-full h-full" viewBox="0 0 400 220">
+          ${fsm.states.map((s, idx) => {
+            const cx = 80 + idx * 120;
+            const cy = 110;
+            const isActive = (s.name === curState);
+
+            return `
+              <g>
+                <circle cx="${cx}" cy="${cy}" r="30" fill="${isActive ? '#dcfce7' : '#f0fdf4'}" stroke="${isActive ? '#16a34a' : '#86efac'}" stroke-width="${isActive ? '4' : '2.5'}" ${isActive ? 'filter="drop-shadow(0 0 8px rgba(34,197,94,0.6))"' : ''}/>
+                <text x="${cx}" y="${cy + 4}" font-size="13" font-weight="bold" fill="${isActive ? '#14532d' : '#15803d'}" text-anchor="middle">${s.name}</text>
+                <text x="${cx}" y="${cy + 48}" font-size="10" font-weight="bold" fill="#64748b" text-anchor="middle">${s.code}</text>
+                ${isActive ? `<text x="${cx}" y="${cy - 36}" font-size="9" font-weight="black" fill="#16a34a" text-anchor="middle">ACTIVE</text>` : ''}
+              </g>
+            `;
+          }).join('')}
+
+          <path d="M 108 100 Q 140 70 172 100" fill="none" stroke="#3b82f6" stroke-width="2"/>
+          <text x="140" y="80" font-size="10" font-weight="bold" fill="#2563eb" text-anchor="middle">1 / 0</text>
+          
+          <path d="M 228 100 Q 260 70 292 100" fill="none" stroke="#3b82f6" stroke-width="2"/>
+          <text x="260" y="80" font-size="10" font-weight="bold" fill="#2563eb" text-anchor="middle">0 / 0</text>
+
+          <path d="M 292 125 Q 200 175 108 125" fill="none" stroke="#ec4899" stroke-width="2"/>
+          <text x="200" y="165" font-size="10" font-weight="bold" fill="#db2777" text-anchor="middle">1 / 1 (Detected!)</text>
+        </svg>
+      `;
+    }
+
+    if (tableEl) {
+      tableEl.innerHTML = `
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="bg-slate-100 border-b border-slate-200">
+              <th class="p-1.5">Current</th>
+              <th class="p-1.5">Input X</th>
+              <th class="p-1.5">Next State</th>
+              <th class="p-1.5">Output Z</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fsm.transitions.map(tr => {
+              const isActive = (tr.from === curState && tr.input === curInputBit);
+              const trClass = isActive ? 'bg-purple-100 font-extrabold text-purple-950 border-l-4 border-l-purple-600' : 'border-b border-slate-100';
+
+              return `
+                <tr class="${trClass}">
+                  <td class="p-1.5 font-bold">${tr.from} ${isActive ? '◀' : ''}</td>
+                  <td class="p-1.5">${tr.input}</td>
+                  <td class="p-1.5 font-bold text-sky-700">${tr.next}</td>
+                  <td class="p-1.5 font-bold ${tr.out ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400'}">${tr.out}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    if (eqList) {
+      eqList.innerHTML = fsm.equations.map(eq => `
+        <div class="p-2 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
+          <span class="font-bold text-slate-700">${eq.target}:</span>
+          <span class="font-bold text-purple-700">${eq.expr}</span>
+        </div>
+      `).join('');
+    }
+  }
+
+  stepLiveFSM() {
+    const fsm = this.suite.designFSM(document.getElementById('fsmPresetSelect')?.value || 'seq101');
+    const curInput = this.sim.switches[0] || 0;
+    const curState = this.suite.fsmCurrentState || 'S0';
+
+    const match = fsm.transitions.find(tr => tr.from === curState && tr.input === curInput);
+    if (match) {
+      this.suite.fsmCurrentState = match.next;
+      this.sim.setManualPulse(true);
+      setTimeout(() => this.sim.setManualPulse(false), 150);
+      this.renderFSMTab();
+      this.showToast(`FSM transitioned from ${curState} ➔ ${match.next} (Output Z=${match.out})`, 'info');
+    }
+  }
+
+  // --- SOLVE -> BUILD CIRCUIT ON TRAINER KIT ---
+  handleSuiteBuild() {
+    let spec;
+    if (this.currentSuiteTab === 'counter') {
+      const counterSeq = document.getElementById('counterSeqSelect')?.value || 'bcd';
+      const counterFF = document.getElementById('counterFFSelect')?.value || 'D';
+      spec = this.suite.synthesizeCounterToKit({ sequenceType: counterSeq, flipFlop: counterFF });
+    } else {
+      spec = this.suite.synthesizeCircuitToKit();
+    }
+
+    this.sim.resetCircuit();
+
+    if (spec.icBases) {
+      spec.icBases.forEach(b => {
+        this.sim.insertIC(b.id, b.icId);
+      });
+      // CRITICAL: Update board dynamic elements immediately so IC chips are mounted
+      // and their pin coordinates are mapped in board.pinCoords BEFORE wires are added
+      this.board.updateDynamicElements();
+    }
+
+    if (spec.wires) {
+      spec.wires.forEach(w => {
+        this.sim.addWire(w.from, w.to, w.color);
+      });
+    }
+
+    if (spec.switches) {
+      spec.switches.forEach(swIdx => {
+        this.sim.switches[swIdx] = 1;
+      });
+    }
+
+    this.sim.setPower(true);
+    this.board.updateDynamicElements();
+    this.wireRenderer.renderWires(
+      this.sim.wires,
+      (endpoint) => this.board.getPinCoord(endpoint),
+      this.sim.power,
+      this.activeTool,
+      (wireId) => this.handleWireClick(wireId)
+    );
+
+    this.setCircuitName(spec.title || 'Digital Logic Circuit');
+    this.storage.recordState();
+
+    document.getElementById('logic-suite-modal')?.classList.add('hidden');
+    this.showToast(`⚡ Built "${spec.title}" on Trainer Kit! Power is ON.`, 'success');
+  }
+
 
   showToast(message, type = 'info') {
     const toastContainer = document.getElementById('toast-container');
@@ -1484,14 +2464,414 @@ class DeldApp {
       setTimeout(() => toast.remove(), 300);
     }, 3200);
   }
+
+  // ==========================================
+  // AUTOMATIC WIRE ROUTING & SYSTEM
+  // ==========================================
+
+  setupAutoWireSystem() {
+    const modal = document.getElementById('auto-wire-modal');
+    const navBtn = document.getElementById('navAutoWireBtn');
+    const hudAutoWireBtn = document.getElementById('pinSelectionAutoWireBtn');
+    const hudCancelBtn = document.getElementById('pinSelectionCancelBtn');
+    const singleConnectBtn = document.getElementById('autoWireSingleConnectBtn');
+    const batchExecuteBtn = document.getElementById('autoWireBatchExecuteBtn');
+    const clearAllWiresBtn = document.getElementById('autoWireClearAllWiresBtn');
+    const tabDropdownBtn = document.getElementById('tabAutoWireDropdownBtn');
+    const tabBatchBtn = document.getElementById('tabAutoWireBatchBtn');
+    const dropdownSection = document.getElementById('autoWireDropdownSection');
+    const batchSection = document.getElementById('autoWireBatchSection');
+
+    // Tab switching
+    if (tabDropdownBtn && tabBatchBtn && dropdownSection && batchSection) {
+      tabDropdownBtn.addEventListener('click', () => {
+        tabDropdownBtn.className = 'auto-wire-tab-btn active px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-cyan-400 border-cyan-400 bg-slate-800/80';
+        tabBatchBtn.className = 'auto-wire-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200';
+        dropdownSection.classList.remove('hidden');
+        batchSection.classList.add('hidden');
+      });
+
+      tabBatchBtn.addEventListener('click', () => {
+        tabBatchBtn.className = 'auto-wire-tab-btn active px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-cyan-400 border-cyan-400 bg-slate-800/80';
+        tabDropdownBtn.className = 'auto-wire-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200';
+        batchSection.classList.remove('hidden');
+        dropdownSection.classList.add('hidden');
+      });
+    }
+
+    // Populate Pin Dropdowns & Color Swatches
+    this.populateAutoWireDropdowns();
+
+    // Open from Navbar Button
+    if (navBtn && modal) {
+      navBtn.addEventListener('click', () => {
+        this.populateAutoWireDropdowns();
+        this.updateAutoWireModalUI();
+        modal.classList.remove('hidden');
+      });
+    }
+
+    // HUD Auto-Wire Button
+    if (hudAutoWireBtn && modal) {
+      hudAutoWireBtn.addEventListener('click', () => {
+        this.populateAutoWireDropdowns();
+        if (this.selectedPin) {
+          const fromVal = `${this.selectedPin.comp}:${this.selectedPin.pin}`;
+          const fromSelect = document.getElementById('autoWireFromSelect');
+          if (fromSelect) fromSelect.value = fromVal;
+        }
+        this.updateAutoWireModalUI();
+        modal.classList.remove('hidden');
+      });
+    }
+
+    // HUD Cancel Button
+    if (hudCancelBtn) {
+      hudCancelBtn.addEventListener('click', () => {
+        this.deselectPin();
+        this.showToast('Pin selection cancelled.', 'info');
+      });
+    }
+
+    // Single Wire Connect
+    if (singleConnectBtn) {
+      singleConnectBtn.addEventListener('click', () => {
+        const fromSelect = document.getElementById('autoWireFromSelect');
+        const toSelect = document.getElementById('autoWireToSelect');
+        if (!fromSelect || !toSelect) return;
+
+        const fromVal = fromSelect.value;
+        const toVal = toSelect.value;
+        if (!fromVal || !toVal) {
+          this.showToast('Please select both source and destination pins.', 'warning');
+          return;
+        }
+
+        const [fromComp, fromPin] = fromVal.split(':');
+        const [toComp, toPin] = toVal.split(':');
+
+        if (fromComp === toComp && fromPin === toPin) {
+          this.showToast('Cannot connect a pin to itself.', 'warning');
+          return;
+        }
+
+        const color = this.wireRenderer.currentColor;
+        const success = this.connectPins({ comp: fromComp, pin: fromPin }, { comp: toComp, pin: toPin }, color);
+        if (success) {
+          this.updateAutoWireModalUI();
+        }
+      });
+    }
+
+    // Batch Auto-Wire Execution
+    if (batchExecuteBtn) {
+      batchExecuteBtn.addEventListener('click', () => {
+        const textarea = document.getElementById('autoWireBatchInput') || document.getElementById('autoWireBatchText');
+        if (!textarea) return;
+        this.executeAutoWireBatch(textarea.value);
+      });
+    }
+
+    // Batch Presets
+    document.querySelectorAll('.batch-insert-btn, .auto-wire-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const syntax = btn.getAttribute('data-text') || btn.getAttribute('data-syntax');
+        const textarea = document.getElementById('autoWireBatchInput') || document.getElementById('autoWireBatchText');
+        if (textarea && syntax) {
+          if (textarea.value.trim() === '') {
+            textarea.value = syntax.trim() + '\n';
+          } else {
+            textarea.value = textarea.value.trim() + '\n' + syntax.trim() + '\n';
+          }
+          textarea.focus();
+        }
+      });
+    });
+
+    // Clear All Wires
+    if (clearAllWiresBtn) {
+      clearAllWiresBtn.addEventListener('click', () => {
+        if (this.sim.wires.length === 0) {
+          this.showToast('No active wires to clear.', 'info');
+          return;
+        }
+        if (confirm(`Disconnect all ${this.sim.wires.length} wires from the board?`)) {
+          this.sim.wires = [];
+          this.sim.evaluate();
+          this.storage.recordState();
+          this.updateAutoWireModalUI();
+          this.showToast('All wires disconnected.', 'info');
+        }
+      });
+    }
+  }
+
+  populateAutoWireDropdowns() {
+    const fromSelect = document.getElementById('autoWireFromSelect');
+    const toSelect = document.getElementById('autoWireToSelect');
+    const swatchesContainer = document.getElementById('autoWireColorSwatches');
+    if (!fromSelect || !toSelect) return;
+
+    const availableCategories = this.board.getAllAvailablePins();
+
+    const renderOptions = () => {
+      return availableCategories.map(cat => `
+        <optgroup label="${cat.category}">
+          ${cat.pins.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
+        </optgroup>
+      `).join('');
+    };
+
+    const optionsHtml = renderOptions();
+    const prevFrom = fromSelect.value;
+    const prevTo = toSelect.value;
+
+    fromSelect.innerHTML = optionsHtml;
+    toSelect.innerHTML = optionsHtml;
+
+    if (prevFrom) fromSelect.value = prevFrom;
+    else fromSelect.value = 'switch:15';
+
+    if (prevTo) toSelect.value = prevTo;
+    else toSelect.value = 'icbase_0:1';
+
+    // Populate Color Swatches
+    if (swatchesContainer && swatchesContainer.children.length === 0) {
+      swatchesContainer.innerHTML = WIRE_PALETTE.map(c => `
+        <button type="button" class="w-6 h-6 rounded-full border border-slate-400 hover:scale-110 transition-transform cursor-pointer auto-wire-color-swatch ${c.hex === this.wireRenderer.currentColor ? 'ring-2 ring-sky-500' : ''}" style="background-color: ${c.hex}" data-hex="${c.hex}" title="${c.name}"></button>
+      `).join('');
+
+      swatchesContainer.querySelectorAll('.auto-wire-color-swatch').forEach(b => {
+        b.addEventListener('click', () => {
+          const hex = b.getAttribute('data-hex');
+          this.wireRenderer.setCurrentColor(hex);
+          swatchesContainer.querySelectorAll('.auto-wire-color-swatch').forEach(s => s.classList.remove('ring-2', 'ring-sky-500'));
+          b.classList.add('ring-2', 'ring-sky-500');
+          this.updateColorPickerActiveRing();
+        });
+      });
+    }
+  }
+
+  updateAutoWireModalUI() {
+    const countBadge = document.getElementById('autoWireActiveCount') || document.getElementById('autoWireCountBadge');
+    if (countBadge) {
+      countBadge.textContent = this.sim.wires.length;
+    }
+
+    const listContainer = document.getElementById('autoWireExistingList');
+    if (listContainer) {
+      if (this.sim.wires.length === 0) {
+        listContainer.innerHTML = `
+          <div class="text-center py-6 text-slate-400 italic text-xs">
+            No wires connected yet. Select pins above or click terminals directly on the board.
+          </div>
+        `;
+      } else {
+        listContainer.innerHTML = this.sim.wires.map((w) => {
+          const fromName = this.board.getHumanReadablePinName(w.from);
+          const toName = this.board.getHumanReadablePinName(w.to);
+          return `
+            <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-slate-300 transition-colors">
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full border border-black/20 shadow-sm shrink-0" style="background-color: ${w.color || '#3b82f6'};"></span>
+                <span class="font-bold text-slate-800">${fromName}</span>
+                <span class="text-slate-400">➔</span>
+                <span class="font-bold text-slate-800">${toName}</span>
+              </div>
+              <button type="button" class="disconnect-wire-btn text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded text-xs font-semibold transition-colors cursor-pointer" data-wire-id="${w.id}">
+                Disconnect
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        listContainer.querySelectorAll('.disconnect-wire-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const wireId = btn.getAttribute('data-wire-id');
+            if (wireId) {
+              this.sim.removeWire(wireId);
+              this.storage.recordState();
+              this.updateAutoWireModalUI();
+              this.showToast('Wire disconnected.', 'info');
+            }
+          });
+        });
+      }
+    }
+  }
+
+  parsePinString(rawStr) {
+    if (!rawStr) return null;
+    const s = rawStr.trim().toLowerCase();
+
+    // 1. Power connections
+    if (['vcc', '+5v', '5v', 'power:vcc', 'power_vcc', 'pwr:vcc', 'vcc:0'].includes(s)) {
+      return { comp: 'power', pin: 'vcc' };
+    }
+    if (['gnd', 'ground', '0v', 'power:gnd', 'power_gnd', 'pwr:gnd', 'gnd:0'].includes(s)) {
+      return { comp: 'power', pin: 'gnd' };
+    }
+
+    // 2. Switches: SW 15, Switch 15, SW15, IN 15, S15
+    const swMatch = s.match(/^(?:sw(?:itch)?|input|in|s)\s*[:\-_]?\s*(\d{1,2})$/);
+    if (swMatch) {
+      const num = parseInt(swMatch[1], 10);
+      if (num >= 0 && num <= 15) return { comp: 'switch', pin: String(num) };
+    }
+
+    // 3. Output LEDs: OUT 13, LED 13, Output 13, OUT13, O13
+    const outMatch = s.match(/^(?:out(?:put)?|led|o)\s*[:\-_]?\s*(\d{1,2})$/);
+    if (outMatch) {
+      const num = parseInt(outMatch[1], 10);
+      if (num >= 0 && num <= 15) return { comp: 'led', pin: String(num) };
+    }
+
+    // 4. Clock: CLK 1Hz, Clock 10Hz, etc.
+    const clkMatch = s.match(/^(?:clk|clock)\s*[:\-_]?\s*(1hz|5hz|10hz|100hz|1khz|10khz|100khz|1|5|10|manual|manual_inv)$/);
+    if (clkMatch) {
+      const val = clkMatch[1].replace('hz', '');
+      return { comp: 'clock', pin: val };
+    }
+
+    // 5. Pulsers: Pulse 1, Pulse A, Pulser 2, Pulser B
+    const pulseMatch = s.match(/^(?:pulse|pulser)\s*[:\-_]?\s*([12ab])$/);
+    if (pulseMatch) {
+      const p = ['1', 'a'].includes(pulseMatch[1]) ? '1' : '2';
+      return { comp: 'pulse', pin: p };
+    }
+
+    // 6. 7-Segment Displays: Disp 1 Pin A, Display 2 Pin DP
+    const dispMatch = s.match(/^(?:disp(?:lay)?)\s*([12])\s*(?:pin|p|:)?\s*([a-g]|dp)$/);
+    if (dispMatch) {
+      return { comp: `display_${dispMatch[1]}`, pin: dispMatch[2] };
+    }
+
+    // 7. IC Base Pin: IC1 Pin 14, Base 1 Pin 7, IC 2 Pin 1, IC1:14, Base 1:7
+    const icMatch = s.match(/^(?:ic(?:base)?|base)\s*[:\-_]?\s*(\d)\s*(?:pin|p|:)?\s*[:\-_]?\s*(\d{1,2})$/);
+    if (icMatch) {
+      const baseNum = parseInt(icMatch[1], 10);
+      const baseIdx = baseNum >= 1 ? baseNum - 1 : 0;
+      const pinNum = parseInt(icMatch[2], 10);
+      if (baseIdx >= 0 && baseIdx < 5 && pinNum >= 1 && pinNum <= 20) {
+        return { comp: `icbase_${baseIdx}`, pin: String(pinNum) };
+      }
+    }
+
+    // 8. Named IC Chip lookup: e.g. "74LS08 Pin 3", "7408 Pin 1"
+    const chipMatch = s.match(/^(74[a-z0-9]+)\s*(?:pin|p|:)?\s*[:\-_]?\s*(\d{1,2})$/);
+    if (chipMatch) {
+      const chipQuery = chipMatch[1];
+      const pinNum = parseInt(chipMatch[2], 10);
+      const foundIdx = this.sim.icBases.findIndex(b => b.icId && b.icId.toLowerCase().includes(chipQuery));
+      if (foundIdx !== -1 && pinNum >= 1 && pinNum <= 20) {
+        return { comp: `icbase_${foundIdx}`, pin: String(pinNum) };
+      }
+    }
+
+    // 9. Direct endpoint format: comp:pin (e.g. switch:15, icbase_0:3)
+    if (s.includes(':')) {
+      const parts = s.split(':');
+      let comp = parts[0].trim();
+      if (comp === 'output') comp = 'led';
+      return { comp, pin: parts[1].trim() };
+    }
+
+    return null;
+  }
+
+  executeAutoWireBatch(text) {
+    const statusMsg = document.getElementById('autoWireBatchLogContainer') || document.getElementById('autoWireStatusMsg');
+    if (!text || text.trim() === '') {
+      this.showToast('Please enter at least one wire connection command.', 'warning');
+      return;
+    }
+
+    const lines = text.split('\n');
+    let successCount = 0;
+    let duplicateCount = 0;
+    const errors = [];
+    const logItems = [];
+
+    lines.forEach((line, idx) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) {
+        return;
+      }
+
+      // Match delimiters: '->', '=>', 'to', ',', '--'
+      const parts = trimmed.split(/\s*(?:->|=>|\bto\b|,|--)\s*/i);
+      if (parts.length < 2) {
+        errors.push(`Line ${idx + 1}: Expected format "FROM -> TO" (Got: "${trimmed}")`);
+        return;
+      }
+
+      const fromStr = parts[0].trim();
+      const toStr = parts[1].trim();
+
+      const fromEp = this.parsePinString(fromStr);
+      const toEp = this.parsePinString(toStr);
+
+      if (!fromEp) {
+        errors.push(`Line ${idx + 1}: Unrecognized source pin "${fromStr}"`);
+        return;
+      }
+      if (!toEp) {
+        errors.push(`Line ${idx + 1}: Unrecognized destination pin "${toStr}"`);
+        return;
+      }
+
+      if (fromEp.comp === toEp.comp && String(fromEp.pin) === String(toEp.pin)) {
+        errors.push(`Line ${idx + 1}: Cannot connect pin to itself (${fromStr})`);
+        return;
+      }
+
+      const added = this.sim.addWire(fromEp, toEp, this.wireRenderer.currentColor);
+      if (added) {
+        successCount++;
+        this.wireRenderer.advanceColor();
+        logItems.push(`✓ Connected: ${fromStr} ➔ ${toStr}`);
+      } else {
+        duplicateCount++;
+        logItems.push(`⚠ Already connected: ${fromStr} ➔ ${toStr}`);
+      }
+    });
+
+    if (successCount > 0) {
+      this.storage.recordState();
+      this.updateColorPickerActiveRing();
+      this.updateAutoWireModalUI();
+      this.showToast(`Auto-wired ${successCount} connection(s) successfully!`, 'success');
+    }
+
+    if (statusMsg) {
+      statusMsg.classList.remove('hidden');
+      statusMsg.innerHTML = `
+        <div class="font-bold text-emerald-400 mb-1">⚡ Batch Results: ${successCount} added, ${duplicateCount} skipped, ${errors.length} failed</div>
+        ${logItems.map(item => `<div class="text-slate-300 text-[11px]">${item}</div>`).join('')}
+        ${errors.map(err => `<div class="text-rose-400 text-[11px]">✕ ${err}</div>`).join('')}
+      `;
+    }
+  }
 }
 
-// Initialize on DOM ready (handles both loading and already-loaded states)
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    window.app = new DeldApp();
-  });
+// Initialize as soon as DOM is ready or if SVG container is already in document
+function initDeldApp() {
+  if (!window.app) {
+    try {
+      window.app = new DeldApp();
+    } catch (e) {
+      console.error('Failed to initialize DeldApp:', e);
+    }
+  }
+}
+
+if (document.getElementById('trainer-kit-svg')) {
+  initDeldApp();
+} else if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initDeldApp);
+  window.addEventListener('load', initDeldApp);
 } else {
-  window.app = new DeldApp();
+  initDeldApp();
 }
 

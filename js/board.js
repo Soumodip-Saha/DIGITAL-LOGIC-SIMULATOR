@@ -24,19 +24,239 @@ export class BoardRenderer {
     this.renderStaticBoard();
   }
 
+
   getPinCoord(endpoint) {
     if (!endpoint) return null;
-    const key = `${endpoint.comp}:${endpoint.pin}`;
-    const coord = this.pinCoords.get(key);
+    let comp = String(endpoint.comp).toLowerCase().trim();
+    let pin = String(endpoint.pin).toLowerCase().trim();
+
+    let coord = this.pinCoords.get(`${comp}:${pin}`);
+    if (!coord) {
+      if (comp === 'vcc' || (comp === 'power' && (pin === 'vcc' || pin === '0'))) {
+        coord = this.pinCoords.get('power:vcc') || this.pinCoords.get('vcc:vcc') || this.pinCoords.get('vcc:0');
+      } else if (comp === 'gnd' || (comp === 'power' && (pin === 'gnd' || pin === '0'))) {
+        coord = this.pinCoords.get('power:gnd') || this.pinCoords.get('gnd:gnd') || this.pinCoords.get('gnd:0');
+      } else if (comp === 'output' || comp === 'led') {
+        coord = this.pinCoords.get(`led:${pin}`);
+      } else if (comp.startsWith('ic_') || comp.startsWith('icbase_')) {
+        const bIdx = comp.replace('icbase_', '').replace('ic_', '');
+        coord = this.pinCoords.get(`icbase_${bIdx}:${pin}`) || this.pinCoords.get(`icbase_${bIdx}:socket_${pin}`);
+      } else if (comp.startsWith('disp_') || comp.startsWith('display_')) {
+        const dIdx = comp.replace('display_', '').replace('disp_', '');
+        coord = this.pinCoords.get(`display_${dIdx}:${pin}`) || this.pinCoords.get(`display_${dIdx}:bcd_${pin}`);
+      }
+    }
+
     if (!coord) return null;
     return {
       x: coord.x,
       y: coord.y,
-      side: coord.side,
-      type: coord.type,
+      side: coord.side || (coord.y > 400 ? 'bottom' : 'top'),
+      type: coord.type || comp,
       comp: endpoint.comp,
       pin: endpoint.pin
     };
+  }
+
+  findPinNearScreenPoint(clientX, clientY) {
+    const svg = this.svg;
+    if (!svg) return null;
+
+    // Map screen coordinates directly into SVG viewBox coordinate space
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const screenCTM = svg.getScreenCTM();
+    if (!screenCTM) return null;
+    const svgP = pt.matrixTransform(screenCTM.inverse());
+
+    let closest = null;
+    let minDistance = Infinity;
+
+    // 1. Direct hit-test check (mouse physically hovering over terminal pin)
+    const directEl = document.elementFromPoint(clientX, clientY)?.closest('.terminal-pin');
+    if (directEl) {
+      const comp = directEl.getAttribute('data-comp');
+      const pin = directEl.getAttribute('data-pin');
+      if (comp && pin) {
+        const coord = this.getPinCoord({ comp, pin });
+        if (coord) {
+          const directDist = Math.hypot(coord.x - svgP.x, coord.y - svgP.y);
+          return { comp, pin, coord, distance: directDist };
+        }
+      }
+    }
+
+    // 2. Precise geometric nearest-pin search across registered board coordinates
+    for (const [key, coord] of this.pinCoords.entries()) {
+      const colonIdx = key.indexOf(':');
+      if (colonIdx === -1) continue;
+      const comp = key.substring(0, colonIdx);
+      const pin = key.substring(colonIdx + 1);
+
+      // Skip internal socket aliases
+      if (pin.startsWith('socket_')) continue;
+
+      const isIC = comp.startsWith('icbase_') || comp.startsWith('ic_');
+      // Generous snap radius: 16px for IC pins (full inter-pin distance), 28px for discrete terminals
+      const snapThreshold = isIC ? 16.0 : 28.0;
+
+      const dist = Math.hypot(coord.x - svgP.x, coord.y - svgP.y);
+      if (dist <= snapThreshold && dist < minDistance) {
+        minDistance = dist;
+        closest = {
+          comp,
+          pin,
+          coord: { x: coord.x, y: coord.y, side: coord.side, type: coord.type },
+          distance: dist
+        };
+      }
+    }
+
+    return closest;
+  }
+
+  getHumanReadablePinName(endpoint) {
+    if (!endpoint) return 'Unknown Pin';
+    const comp = String(endpoint.comp).toLowerCase().trim();
+    const pin = String(endpoint.pin).toLowerCase().trim();
+
+    if (comp === 'switch') return `SW ${pin}`;
+    if (comp === 'led' || comp === 'output') return `OUT ${pin}`;
+    if (comp === 'vcc' || (comp === 'power' && pin === 'vcc') || (comp === 'power' && pin === '0')) return `VCC (+5V)`;
+    if (comp === 'gnd' || (comp === 'power' && pin === 'gnd') || (comp === 'power' && pin === '0')) return `GND (0V)`;
+    if (comp === 'clock') {
+      if (pin === 'manual') return `Clock Manual (HIGH)`;
+      if (pin === 'manual_inv') return `Clock Manual (LOW)`;
+      return `Clock ${pin} Hz`;
+    }
+    if (comp.startsWith('icbase_') || comp.startsWith('ic_')) {
+      const idx = parseInt(comp.replace('icbase_', '').replace('ic_', ''), 10);
+      const baseNum = idx + 1;
+      const base = this.sim.icBases[idx];
+      const icTag = base && base.icId ? ` [${base.icId}]` : '';
+      const pinTag = base && base.pins && base.pins[pin] ? ` (${base.pins[pin].name})` : '';
+      return `IC Base ${baseNum}${icTag} Pin ${pin}${pinTag}`;
+    }
+    if (comp.startsWith('display_') || comp.startsWith('disp_')) {
+      const dNum = comp.replace('display_', '').replace('disp_', '');
+      return `Display ${dNum} [${pin.toUpperCase()}]`;
+    }
+    return `${comp} Pin ${pin}`;
+  }
+
+  getAllAvailablePins() {
+    const categories = [];
+
+    // 1. Power Supply
+    categories.push({
+      category: 'Power Supply',
+      pins: [
+        { value: 'power:vcc', label: 'VCC (+5V Power)' },
+        { value: 'power:gnd', label: 'GND (0V Ground)' }
+      ]
+    });
+
+    // 2. Input Switches (SW 15 down to 0)
+    const switchPins = [];
+    for (let i = 15; i >= 0; i--) {
+      switchPins.push({
+        value: `switch:${i}`,
+        label: `SW ${i} (Input Switch ${i})`
+      });
+    }
+    categories.push({
+      category: 'Input Switches (SW 15 - SW 0)',
+      pins: switchPins
+    });
+
+    // 3. Output LEDs (OUT 15 down to 0)
+    const ledPins = [];
+    for (let i = 15; i >= 0; i--) {
+      ledPins.push({
+        value: `led:${i}`,
+        label: `OUT ${i} (Output LED ${i})`
+      });
+    }
+    categories.push({
+      category: 'Output LEDs (OUT 15 - OUT 0)',
+      pins: ledPins
+    });
+
+    // 4. Clock Generators
+    categories.push({
+      category: 'Clock Generators',
+      pins: [
+        { value: 'clock:1', label: 'Clock 1 Hz' },
+        { value: 'clock:5', label: 'Clock 5 Hz' },
+        { value: 'clock:10', label: 'Clock 10 Hz' },
+        { value: 'clock:manual', label: 'Manual Pulser (Active HIGH)' },
+        { value: 'clock:manual_inv', label: 'Manual Pulser (Active LOW)' }
+      ]
+    });
+
+    // 5. IC Bases 1 to 5
+    for (let b = 0; b < 5; b++) {
+      const base = this.sim.icBases[b];
+      const icTag = base && base.icId ? ` [${base.icId}]` : ' (Empty)';
+      const pins = [];
+      for (let p = 1; p <= 20; p++) {
+        const pinTag = base && base.pins && base.pins[p] ? ` (${base.pins[p].name})` : '';
+        pins.push({
+          value: `icbase_${b}:${p}`,
+          label: `Base ${b + 1} Pin ${p}${pinTag}`
+        });
+      }
+      categories.push({
+        category: `IC Base ${b + 1}${icTag}`,
+        pins: pins
+      });
+    }
+
+    // 6. 7-Segment Displays
+    for (let d = 1; d <= 2; d++) {
+      const segs = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'];
+      categories.push({
+        category: `7-Segment Display ${d}`,
+        pins: segs.map(s => ({
+          value: `display_${d}:${s}`,
+          label: `Display ${d} Segment ${s.toUpperCase()}`
+        }))
+      });
+    }
+
+    return categories;
+  }
+
+
+
+  getHumanReadablePinName(endpoint) {
+    if (!endpoint) return 'Unknown Pin';
+    const comp = String(endpoint.comp).toLowerCase().trim();
+    const pin = String(endpoint.pin).toLowerCase().trim();
+
+    if (comp === 'switch') return `SW ${pin}`;
+    if (comp === 'led' || comp === 'output') return `OUT ${pin}`;
+    if (comp === 'vcc' || (comp === 'power' && (pin === 'vcc' || pin === '0'))) return `VCC (+5V)`;
+    if (comp === 'gnd' || (comp === 'power' && (pin === 'gnd' || pin === '1'))) return `GND (0V)`;
+    if (comp === 'clock') {
+      if (pin === 'manual') return `Clock Manual (HIGH)`;
+      if (pin === 'manual_inv') return `Clock Manual (LOW)`;
+      return `Clock ${pin} Hz`;
+    }
+    if (comp.startsWith('icbase_') || comp.startsWith('ic_')) {
+      const idx = parseInt(comp.replace('icbase_', '').replace('ic_', ''), 10);
+      const baseNum = idx + 1;
+      const base = this.sim.icBases[idx];
+      const icTag = base && base.icId ? ` [${base.icId}]` : '';
+      const pinTag = base && base.pins && base.pins[pin] ? ` (${base.pins[pin].name})` : '';
+      return `IC Base ${baseNum}${icTag} Pin ${pin}${pinTag}`;
+    }
+    if (comp.startsWith('display_') || comp.startsWith('disp_')) {
+      const dNum = comp.replace('display_', '').replace('disp_', '');
+      return `Display ${dNum} [${pin.toUpperCase()}]`;
+    }
+    return `${comp} Pin ${pin}`;
   }
 
   initDefs() {
@@ -185,42 +405,52 @@ export class BoardRenderer {
     }
     this.pinCoords.set(key, { x: cx, y: cy, side: computedSide, type });
 
+    const isICPin = comp.startsWith('icbase_') || comp.startsWith('ic_');
+    const hitRadius = isICPin ? 7.5 : 14;
+
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('class', 'terminal-pin');
     g.setAttribute('data-comp', comp);
     g.setAttribute('data-pin', pinStr);
+    if (isICPin) {
+      g.setAttribute('data-socket-pin', pinStr);
+      g.setAttribute('data-socket-side', computedSide);
+    }
     g.setAttribute('cursor', 'pointer');
     g.style.pointerEvents = 'all';
 
     g.innerHTML = `
-      <!-- Generous hit circle (30px diameter) with opacity 0 to guarantee SVG hit-testing across all browsers -->
-      <circle cx="${cx}" cy="${cy}" r="15" fill="#000000" opacity="0" pointer-events="all"/>
+      <!-- Precise non-overlapping hit circle (7.5px radius for IC pins to prevent neighbor collision; 14px for discrete) -->
+      <circle cx="${cx}" cy="${cy}" r="${hitRadius}" fill="#000000" opacity="0" pointer-events="all"/>
       <!-- Outer silver rim -->
-      <circle cx="${cx}" cy="${cy}" r="8.5" fill="#cbd5e1" stroke="#334155" stroke-width="1.2" filter="url(#chip-shadow)" pointer-events="all"/>
+      <circle cx="${cx}" cy="${cy}" r="${isICPin ? 7.5 : 8.5}" fill="#cbd5e1" stroke="#334155" stroke-width="1.2" filter="url(#chip-shadow)" pointer-events="all"/>
       <!-- Inner contact hole -->
-      <circle cx="${cx}" cy="${cy}" r="5.5" fill="url(#pin-hole-metal)" pointer-events="all"/>
+      <circle cx="${cx}" cy="${cy}" r="${isICPin ? 4.5 : 5.5}" fill="url(#pin-hole-metal)" pointer-events="all"/>
       <!-- Hover / Active highlight circle -->
-      <circle class="terminal-hover-ring" cx="${cx}" cy="${cy}" r="12" fill="none" stroke="#facc15" stroke-width="2.5" opacity="0" pointer-events="none"/>
+      <circle class="terminal-hover-ring" cx="${cx}" cy="${cy}" r="${isICPin ? 9.5 : 12}" fill="none" stroke="#facc15" stroke-width="2.5" opacity="0" pointer-events="none"/>
     `;
 
     g.addEventListener('click', (e) => {
       e.stopPropagation();
+      const activePin = g.getAttribute('data-pin') || pinStr;
       if (this.callbacks.onPinClick) {
-        this.callbacks.onPinClick({ comp, pin: pinStr }, { x: cx, y: cy });
+        this.callbacks.onPinClick({ comp, pin: activePin }, { x: cx, y: cy });
       }
     });
 
     g.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      const activePin = g.getAttribute('data-pin') || pinStr;
       if (this.callbacks.onPinMouseDown) {
-        this.callbacks.onPinMouseDown({ comp, pin: pinStr }, { x: cx, y: cy }, e);
+        this.callbacks.onPinMouseDown({ comp, pin: activePin }, { x: cx, y: cy }, e);
       }
     });
 
     g.addEventListener('mouseup', (e) => {
       e.stopPropagation();
+      const activePin = g.getAttribute('data-pin') || pinStr;
       if (this.callbacks.onPinMouseUp) {
-        this.callbacks.onPinMouseUp({ comp, pin: pinStr }, { x: cx, y: cy }, e);
+        this.callbacks.onPinMouseUp({ comp, pin: activePin }, { x: cx, y: cy }, e);
       }
     });
 
@@ -307,8 +537,9 @@ export class BoardRenderer {
     this.svg.appendChild(vccLabel);
 
     this.createPinHole(vccX, 76, 'power', 'vcc');
-    this.pinCoords.set('vcc:0', { x: vccX, y: 76 });
-    this.pinCoords.set('vcc:vcc', { x: vccX, y: 76 });
+    this.pinCoords.set('vcc:0', { x: vccX, y: 76, side: 'top', type: 'vcc' });
+    this.pinCoords.set('vcc:vcc', { x: vccX, y: 76, side: 'top', type: 'vcc' });
+    this.pinCoords.set('power:vcc', { x: vccX, y: 76, side: 'top', type: 'vcc' });
 
     // Dual 7-Segment Displays (Right top)
     const disp1X = 815;
@@ -337,20 +568,24 @@ export class BoardRenderer {
     pwrBtn.setAttribute('cursor', 'pointer');
     pwrBtn.innerHTML = `
       <!-- Generous invisible hit circle (48px diameter) -->
-      <circle cx="${pwrX}" cy="${pwrY}" r="24" fill="transparent"/>
+      <circle cx="${pwrX}" cy="${pwrY}" r="24" fill="#000000" opacity="0" pointer-events="all"/>
       <circle cx="${pwrX}" cy="${pwrY}" r="16" fill="#0f172a" stroke="#334155" stroke-width="1.5" pointer-events="none"/>
-      <circle id="power-indicator-ring" cx="${pwrX}" cy="${pwrY}" r="12" fill="#dc2626" pointer-events="none"/>
+      <circle id="power-indicator-ring" cx="${pwrX}" cy="${pwrY}" r="12" fill="#ef4444" filter="url(#led-glow-red)" pointer-events="none"/>
       <!-- Power Icon ⏻ -->
       <path d="M ${pwrX} ${pwrY - 6} L ${pwrX} ${pwrY - 1}" stroke="#ffffff" stroke-width="2" stroke-linecap="round" pointer-events="none"/>
       <path d="M ${pwrX - 4.5} ${pwrY - 3} A 5.5 5.5 0 1 0 ${pwrX + 4.5} ${pwrY - 3}" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" pointer-events="none"/>
     `;
 
-    pwrBtn.addEventListener('click', (e) => {
+    const togglePower = (e) => {
       e.stopPropagation();
+      e.preventDefault();
       if (this.callbacks.onPowerToggle) {
         this.callbacks.onPowerToggle();
       }
-    });
+    };
+
+    pwrBtn.addEventListener('click', togglePower);
+    pwrBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
     this.svg.appendChild(pwrBtn);
   }
 
@@ -754,7 +989,7 @@ export class BoardRenderer {
 
       swG.innerHTML = `
         <!-- Generous invisible hit area (36px wide x 60px high) -->
-        <rect x="${cx - 18}" y="605" width="36" height="60" fill="transparent"/>
+        <rect x="${cx - 18}" y="605" width="36" height="60" fill="#000000" opacity="0" pointer-events="all"/>
         <!-- Vertical slot -->
         <rect x="${cx - 5}" y="612" width="10" height="25" rx="5" fill="#002b49" pointer-events="none"/>
         <!-- Toggle Knob (circle with chrome highlight) -->
@@ -763,12 +998,16 @@ export class BoardRenderer {
         <text x="${cx}" y="658" text-anchor="middle" font-family="'Inter', sans-serif" font-weight="800" font-size="11.5" fill="#002b49" pointer-events="none">${i}</text>
       `;
 
-      swG.addEventListener('click', (e) => {
+      const toggleSwitch = (e) => {
         e.stopPropagation();
+        e.preventDefault();
         if (this.callbacks.onSwitchToggle) {
           this.callbacks.onSwitchToggle(i);
         }
-      });
+      };
+
+      swG.addEventListener('click', toggleSwitch);
+      swG.addEventListener('pointerdown', (e) => e.stopPropagation());
       this.svg.appendChild(swG);
     }
 
@@ -786,8 +1025,9 @@ export class BoardRenderer {
     this.svg.appendChild(gndLabel);
 
     this.createPinHole(gndX, 590, 'power', 'gnd');
-    this.pinCoords.set('gnd:0', { x: gndX, y: 590 });
-    this.pinCoords.set('gnd:gnd', { x: gndX, y: 590 });
+    this.pinCoords.set('gnd:0', { x: gndX, y: 590, side: 'bottom', type: 'gnd' });
+    this.pinCoords.set('gnd:gnd', { x: gndX, y: 590, side: 'bottom', type: 'gnd' });
+    this.pinCoords.set('power:gnd', { x: gndX, y: 590, side: 'bottom', type: 'gnd' });
 
     // 2. CLOCK SECTION (Right side)
     const clkTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -878,7 +1118,7 @@ export class BoardRenderer {
 
     pulseBtn.innerHTML = `
       <!-- Generous invisible hit area (140px x 42px) -->
-      <rect x="${pulseX - 6}" y="${pulseY + 8}" width="142" height="42" fill="transparent"/>
+      <rect x="${pulseX - 6}" y="${pulseY + 8}" width="142" height="42" fill="#000000" opacity="0" pointer-events="all"/>
       <!-- Black rounded rectangular body -->
       <rect id="pulse-box-rect" x="${pulseX}" y="${pulseY + 12}" width="130" height="32" rx="6" fill="#111827" stroke="#1f2937" stroke-width="1.5" filter="url(#chip-shadow)" pointer-events="none"/>
       <!-- Pulse waveform icon in red -->
@@ -889,12 +1129,14 @@ export class BoardRenderer {
 
     const pressHandler = (e) => {
       e.stopPropagation();
+      e.preventDefault();
       pulseBtn.querySelector('#pulse-box-rect')?.setAttribute('fill', '#1e293b');
       if (this.callbacks.onPulsePress) this.callbacks.onPulsePress();
     };
 
     const releaseHandler = (e) => {
       e.stopPropagation();
+      e.preventDefault();
       pulseBtn.querySelector('#pulse-box-rect')?.setAttribute('fill', '#111827');
       if (this.callbacks.onPulseRelease) this.callbacks.onPulseRelease();
     };
@@ -902,6 +1144,9 @@ export class BoardRenderer {
     pulseBtn.addEventListener('mousedown', pressHandler);
     pulseBtn.addEventListener('mouseup', releaseHandler);
     pulseBtn.addEventListener('mouseleave', releaseHandler);
+    pulseBtn.addEventListener('touchstart', pressHandler, { passive: false });
+    pulseBtn.addEventListener('touchend', releaseHandler, { passive: false });
+    pulseBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
     pulseBtn.addEventListener('click', (e) => e.stopPropagation());
 
     this.svg.appendChild(pulseBtn);
@@ -918,11 +1163,11 @@ export class BoardRenderer {
     const pwrRing = this.svg.querySelector('#power-indicator-ring');
     if (pwrRing) {
       if (isPowerOn) {
-        pwrRing.setAttribute('fill', '#16a34a');
+        pwrRing.setAttribute('fill', '#22c55e');
         pwrRing.setAttribute('filter', 'url(#led-glow-green)');
       } else {
-        pwrRing.setAttribute('fill', '#dc2626');
-        pwrRing.removeAttribute('filter');
+        pwrRing.setAttribute('fill', '#ef4444');
+        pwrRing.setAttribute('filter', 'url(#led-glow-red)');
       }
     }
 
@@ -1004,6 +1249,12 @@ export class BoardRenderer {
 
       // Reset pin labels to default socket numbering if empty
       if (!base.icId) {
+        // Clear all previous keys for this base to prevent stale mappings
+        for (const k of Array.from(this.pinCoords.keys())) {
+          if (k.startsWith(`icbase_${baseIdx}:`)) {
+            this.pinCoords.delete(k);
+          }
+        }
         if (baseBody) {
           baseBody.setAttribute('stroke', '#222222');
           baseBody.setAttribute('stroke-width', '1.5');
@@ -1013,16 +1264,34 @@ export class BoardRenderer {
           baseLabel.setAttribute('fill', '#ffffff');
         }
         for (let r = 0; r < rows; r++) {
-          const leftLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-left-${r + 1}`);
+          const leftP = r + 1;
+          const rightP = 20 - r;
+          const leftLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-left-${leftP}`);
           if (leftLbl) {
-            leftLbl.textContent = String(r + 1);
+            leftLbl.textContent = String(leftP);
             leftLbl.setAttribute('fill', '#bae6fd');
           }
-          const rightLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-right-${20 - r}`);
+          const rightLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-right-${rightP}`);
           if (rightLbl) {
-            rightLbl.textContent = String(20 - r);
+            rightLbl.textContent = String(rightP);
             rightLbl.setAttribute('fill', '#bae6fd');
           }
+          const leftPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${leftP}"]`);
+          if (leftPinEl) {
+            leftPinEl.setAttribute('data-pin', String(leftP));
+          }
+          const rightPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${rightP}"]`);
+          if (rightPinEl) {
+            rightPinEl.setAttribute('data-pin', String(rightP));
+          }
+
+          const leftHoleX = chipX - 18 - 8;
+          const rightHoleX = chipX + chipW + 18 + 8;
+          const py = startPinY + r * pinSpacingY;
+          this.pinCoords.set(`icbase_${baseIdx}:${leftP}`, { x: leftHoleX, y: py, side: 'left', type: 'ic' });
+          this.pinCoords.set(`icbase_${baseIdx}:${rightP}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
+          this.pinCoords.set(`icbase_${baseIdx}:socket_${leftP}`, { x: leftHoleX, y: py, side: 'left', type: 'ic' });
+          this.pinCoords.set(`icbase_${baseIdx}:socket_${rightP}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
         }
         return;
       }
@@ -1031,6 +1300,13 @@ export class BoardRenderer {
       const icDef = IC_LIBRARY[base.icId];
       const icPins = icDef ? icDef.pins : 14;
       const icRows = icPins / 2; // 7 for 14-pin ICs; 8 for 16-pin ICs; 10 for 20-pin ICs
+
+      // Clear all previous keys for this base so no stale socket keys collide
+      for (const k of Array.from(this.pinCoords.keys())) {
+        if (k.startsWith(`icbase_${baseIdx}:`)) {
+          this.pinCoords.delete(k);
+        }
+      }
 
       if (baseBody) {
         baseBody.setAttribute('stroke', '#0284c7');
@@ -1113,6 +1389,11 @@ export class BoardRenderer {
         const leftHoleX = chipX - 18 - 8;
         this.pinCoords.set(`icbase_${baseIdx}:${pNumLeft}`, { x: leftHoleX, y: py, side: 'left', type: 'ic' });
 
+        const leftPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${pNumLeft}"]`);
+        if (leftPinEl) {
+          leftPinEl.setAttribute('data-pin', String(pNumLeft));
+        }
+
         const leftLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-left-${pNumLeft}`);
         if (leftLbl) {
           leftLbl.textContent = String(pNumLeft);
@@ -1145,12 +1426,8 @@ export class BoardRenderer {
         const rightData = base.pins[icPinRight] || {};
         const rightHoleX = chipX + chipW + 18 + 8;
 
-        // Register IC pin number (takes precedence for mounted chip)
+        // Register IC pin number and socket pin alias
         this.pinCoords.set(`icbase_${baseIdx}:${icPinRight}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
-        // Register socket pin number alias only if it does not collide with an active IC pin number
-        if (socketPinRight > icPins) {
-          this.pinCoords.set(`icbase_${baseIdx}:${socketPinRight}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
-        }
         this.pinCoords.set(`icbase_${baseIdx}:socket_${socketPinRight}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
 
         // Update board right pin label to show the IC pin number for intuitive wiring
@@ -1158,6 +1435,12 @@ export class BoardRenderer {
         if (rightLbl) {
           rightLbl.textContent = String(icPinRight);
           rightLbl.setAttribute('fill', '#38bdf8');
+        }
+
+        // Synchronize underlying .terminal-pin element with active IC pin
+        const rightPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${socketPinRight}"]`);
+        if (rightPinEl) {
+          rightPinEl.setAttribute('data-pin', String(icPinRight));
         }
 
         // Right pin function label inside chip edge
@@ -1194,6 +1477,21 @@ export class BoardRenderer {
           rightLbl.textContent = String(rightP);
           rightLbl.setAttribute('fill', '#64748b'); // Dimmed
         }
+
+        const leftPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${leftP}"]`);
+        if (leftPinEl) {
+          leftPinEl.setAttribute('data-pin', `socket_${leftP}`);
+        }
+        const rightPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${rightP}"]`);
+        if (rightPinEl) {
+          rightPinEl.setAttribute('data-pin', `socket_${rightP}`);
+        }
+
+        const leftHoleX = chipX - 18 - 8;
+        const rightHoleX = chipX + chipW + 18 + 8;
+        const py = startPinY + r * pinSpacingY;
+        this.pinCoords.set(`icbase_${baseIdx}:socket_${leftP}`, { x: leftHoleX, y: py, side: 'left', type: 'ic' });
+        this.pinCoords.set(`icbase_${baseIdx}:socket_${rightP}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
       }
 
       this.icLayer.appendChild(g);

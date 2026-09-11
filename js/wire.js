@@ -24,6 +24,86 @@ export class WireRenderer {
     this.signalColorMode = false; // Authentic palette colors by default; toggleable via toolbar
     this.drawingWire = null;
     this.wirePathElements = new Map(); // wireId -> SVG group
+    this.previewGroup = null;
+  }
+
+  _ensurePreviewLayer() {
+    if (!this.previewGroup || !this.previewGroup.parentNode) {
+      let g = this.container.querySelector('#wire-preview-group');
+      if (!g) {
+        g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('id', 'wire-preview-group');
+        g.setAttribute('pointer-events', 'none');
+        g.style.pointerEvents = 'none';
+
+        const shadow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        shadow.setAttribute('class', 'wire-preview-shadow');
+        shadow.setAttribute('fill', 'none');
+        shadow.setAttribute('stroke', 'rgba(0,0,0,0.3)');
+        shadow.setAttribute('stroke-width', '4');
+        shadow.setAttribute('stroke-linecap', 'round');
+        shadow.setAttribute('stroke-linejoin', 'round');
+        shadow.setAttribute('filter', 'url(#wire-shadow-filter)');
+
+        const main = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        main.setAttribute('class', 'wire-preview-main');
+        main.setAttribute('fill', 'none');
+        main.setAttribute('stroke-width', '2.5');
+        main.setAttribute('stroke-linecap', 'round');
+        main.setAttribute('stroke-linejoin', 'round');
+        main.setAttribute('stroke-dasharray', '6,4');
+
+        const tip = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        tip.setAttribute('class', 'wire-preview-tip');
+        tip.setAttribute('r', '4.5');
+        tip.setAttribute('stroke-width', '1.5');
+        tip.setAttribute('stroke', '#ffffff');
+
+        g.appendChild(shadow);
+        g.appendChild(main);
+        g.appendChild(tip);
+        this.container.appendChild(g);
+      }
+      this.previewGroup = g;
+    }
+    return this.previewGroup;
+  }
+
+  renderPreview(fromCoord, toCoord) {
+    if (!fromCoord || !toCoord) return;
+    const g = this._ensurePreviewLayer();
+    g.style.display = 'block';
+
+    // Compute Manhattan orthogonal route from source pin to dynamic cursor coordinate
+    let d = WireRenderer.computeOrthogonalPath(fromCoord, toCoord, 0, []);
+    if (!d || d.length < 5) {
+      d = `M ${fromCoord.x} ${fromCoord.y} L ${toCoord.x} ${toCoord.y}`;
+    }
+
+    const shadow = g.querySelector('.wire-preview-shadow');
+    const main = g.querySelector('.wire-preview-main');
+    const tip = g.querySelector('.wire-preview-tip');
+
+    if (shadow) shadow.setAttribute('d', d);
+    if (main) {
+      main.setAttribute('d', d);
+      main.setAttribute('stroke', this.currentColor);
+    }
+    if (tip) {
+      tip.setAttribute('cx', String(toCoord.x));
+      tip.setAttribute('cy', String(toCoord.y));
+      tip.setAttribute('fill', this.currentColor);
+    }
+  }
+
+  clearPreview() {
+    if (this.previewGroup) {
+      this.previewGroup.style.display = 'none';
+      const shadow = this.previewGroup.querySelector('.wire-preview-shadow');
+      const main = this.previewGroup.querySelector('.wire-preview-main');
+      if (shadow) shadow.removeAttribute('d');
+      if (main) main.removeAttribute('d');
+    }
   }
 
   setCurrentColor(hex) {
@@ -172,7 +252,7 @@ export class WireRenderer {
 
       // Check if local: terminal is in front of the pin side, without crossing any other base
       const isCorrectSide = isLeftPin ? (p1.x <= p2.x) : (p1.x >= p2.x);
-      const isWithinCol = Math.abs(p1.x - p2.x) < 90;
+      const isWithinCol = Math.abs(p1.x - p2.x) < 160;
       const isLocal = isCorrectSide && isWithinCol && !crossesOtherBases(p1.x, p2.x, p2.y, baseIdx);
 
       if (isLocal) {
@@ -277,10 +357,13 @@ export class WireRenderer {
         points.push({ x: p2.x, y: trunkY });
         points.push({ x: p2.x, y: p2.y });
       } else {
-        const midY = (p1.y + p2.y) / 2;
+        // One terminal is bottom (switch/pulse/gnd), one is top (led/vcc/display)
+        const isBottomFirst = (p1.y > p2.y);
+        const highwayLane = (wireIndex % 4) * 7;
+        const yHighway = isBottomFirst ? (485 - highwayLane) : (175 + highwayLane);
         points.push({ x: p1.x, y: p1.y });
-        points.push({ x: p1.x, y: midY });
-        points.push({ x: p2.x, y: midY });
+        points.push({ x: p1.x, y: yHighway });
+        points.push({ x: p2.x, y: yHighway });
         points.push({ x: p2.x, y: p2.y });
       }
     }
@@ -307,38 +390,6 @@ export class WireRenderer {
     return `M ${x1} ${y1} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x2} ${y2}`;
   }
 
-  /**
-   * Renders the temporary rubberband wire following the mouse during drag.
-   */
-  renderPreview(startCoord, currentCoord) {
-    let previewEl = this.container.querySelector('#wire-preview-path');
-    if (!startCoord || !currentCoord) {
-      if (previewEl) previewEl.remove();
-      return;
-    }
-
-    const d = WireRenderer.computeOrthogonalPath(startCoord, currentCoord);
-
-    if (!previewEl) {
-      previewEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      previewEl.setAttribute('id', 'wire-preview-path');
-      previewEl.setAttribute('fill', 'none');
-      previewEl.setAttribute('stroke-width', '2.5');
-      previewEl.setAttribute('stroke-linecap', 'round');
-      previewEl.setAttribute('stroke-linejoin', 'round');
-      previewEl.setAttribute('stroke-dasharray', '5 3');
-      previewEl.setAttribute('pointer-events', 'none');
-      this.container.appendChild(previewEl);
-    }
-
-    previewEl.setAttribute('d', d);
-    previewEl.setAttribute('stroke', this.currentColor);
-  }
-
-  clearPreview() {
-    const previewEl = this.container.querySelector('#wire-preview-path');
-    if (previewEl) previewEl.remove();
-  }
 
   /**
    * Renders all circuit wires onto the SVG layer.

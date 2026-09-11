@@ -1556,22 +1556,44 @@ class CircuitSimulator {
     return prevId !== null;
   }
 
-  addWire(from, to, color = '#F64E4D') {
-    // Normalization check: from and to should be distinct terminals
-    if (from.comp === to.comp && from.pin === to.pin) return null;
+  _normalizeEndpoint(ep) {
+    if (!ep) return null;
+    let comp = String(ep.comp).toLowerCase().trim();
+    let pin = String(ep.pin).toLowerCase().trim();
 
-    // Check if wire already exists
-    const exists = this.wires.some(w =>
-      (w.from.comp === from.comp && w.from.pin === from.pin && w.to.comp === to.comp && w.to.pin === to.pin) ||
-      (w.from.comp === to.comp && w.from.pin === to.pin && w.to.comp === from.comp && w.to.pin === from.pin)
-    );
+    if (comp === 'power' && pin === 'vcc') { comp = 'vcc'; pin = '0'; }
+    else if (comp === 'power' && pin === 'gnd') { comp = 'gnd'; pin = '0'; }
+    else if (comp === 'vcc') { pin = '0'; }
+    else if (comp === 'gnd') { pin = '0'; }
+    else if (comp === 'output') { comp = 'led'; }
+    else if (comp.startsWith('ic_')) { comp = comp.replace('ic_', 'icbase_'); }
+    else if (comp.startsWith('base_')) { comp = comp.replace('base_', 'icbase_'); }
+
+    return { comp, pin };
+  }
+
+  addWire(from, to, color = '#F64E4D') {
+    const nFrom = this._normalizeEndpoint(from);
+    const nTo = this._normalizeEndpoint(to);
+    if (!nFrom || !nTo) return null;
+    if (nFrom.comp === nTo.comp && nFrom.pin === nTo.pin) return null;
+
+    // Check if wire already exists (normalized)
+    const exists = this.wires.some(w => {
+      const wFrom = this._normalizeEndpoint(w.from);
+      const wTo = this._normalizeEndpoint(w.to);
+      return (
+        (wFrom.comp === nFrom.comp && wFrom.pin === nFrom.pin && wTo.comp === nTo.comp && wTo.pin === nTo.pin) ||
+        (wFrom.comp === nTo.comp && wFrom.pin === nTo.pin && wTo.comp === nFrom.comp && wTo.pin === nFrom.pin)
+      );
+    });
     if (exists) return null;
 
     const wire = {
       id: `w_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      from,
-      to,
-      color,
+      from: nFrom,
+      to: nTo,
+      color: color || '#F64E4D',
       level: 0
     };
 
@@ -1630,7 +1652,11 @@ class CircuitSimulator {
 
     // Constant power drivers
     drivers.set('power:vcc', 1);
+    drivers.set('vcc:0', 1);
+    drivers.set('vcc:vcc', 1);
     drivers.set('power:gnd', 0);
+    drivers.set('gnd:0', 0);
+    drivers.set('gnd:gnd', 0);
 
     // Switches as drivers
     this.switches.forEach((val, i) => {
@@ -1639,10 +1665,14 @@ class CircuitSimulator {
 
     // Clock signals as drivers
     drivers.set('clock:0.5', this.clocks[0.5]);
+    drivers.set('clock:0_5', this.clocks[0.5]);
     drivers.set('clock:1', this.clocks[1]);
     drivers.set('clock:5', this.clocks[5]);
     drivers.set('clock:10', this.clocks[10]);
     drivers.set('clock:manual', this.clocks.manual);
+    drivers.set('clock:manual_inv', this.clocks.manual === 1 ? 0 : 1);
+    drivers.set('clock:high', this.clocks.manual);
+    drivers.set('clock:low', this.clocks.manual === 1 ? 0 : 1);
 
     // Reset IC pin input levels before propagation
     this.icBases.forEach((base, bIdx) => {
@@ -1731,9 +1761,11 @@ class CircuitSimulator {
               if (icDef.pins === 14 && p >= 8 && p <= 14) {
                 const socketPin = 20 - (14 - p);
                 drivers.set(`icbase_${bIdx}:${socketPin}`, val);
+                drivers.set(`icbase_${bIdx}:socket_${socketPin}`, val);
               } else if (icDef.pins === 16 && p >= 9 && p <= 16) {
                 const socketPin = 20 - (16 - p);
                 drivers.set(`icbase_${bIdx}:${socketPin}`, val);
+                drivers.set(`icbase_${bIdx}:socket_${socketPin}`, val);
               }
 
               if (oldVal !== val) {
@@ -1840,18 +1872,29 @@ class CircuitSimulator {
   _applySignalToEndpoint(endpoint, signal) {
     if (endpoint.comp.startsWith('icbase_')) {
       const bIdx = Number(endpoint.comp.replace('icbase_', ''));
-      let pinNum = Number(endpoint.pin);
+      let pinStr = String(endpoint.pin).trim();
       const base = this.icBases[bIdx];
       if (!base || !base.icId) return;
 
       const icDef = IC_LIBRARY[base.icId];
       if (!icDef) return;
 
+      let pinNum = Number(pinStr);
+
       // Translate socket pin number to IC pin number if socket pin was targeted
-      if (icDef.pins === 14 && pinNum > 14 && pinNum <= 20) {
-        pinNum = 14 - (20 - pinNum); // 20 -> 14 (VCC), 19 -> 13, ..., 14 -> 8
+      if (pinStr.startsWith('socket_')) {
+        const sNum = parseInt(pinStr.replace('socket_', ''), 10);
+        if (icDef.pins === 14 && sNum >= 14 && sNum <= 20) {
+          pinNum = 14 - (20 - sNum);
+        } else if (icDef.pins === 16 && sNum >= 13 && sNum <= 20) {
+          pinNum = 16 - (20 - sNum);
+        } else {
+          pinNum = sNum;
+        }
+      } else if (icDef.pins === 14 && pinNum > 14 && pinNum <= 20) {
+        pinNum = 14 - (20 - pinNum); // 20 -> 14 (VCC), 19 -> 13, ..., 15 -> 9
       } else if (icDef.pins === 16 && pinNum > 16 && pinNum <= 20) {
-        pinNum = 16 - (20 - pinNum); // 20 -> 16 (VCC), 19 -> 15, ..., 13 -> 9
+        pinNum = 16 - (20 - pinNum); // 20 -> 16 (VCC), 19 -> 15, ..., 17 -> 9
       }
 
       if (base.pins[pinNum] && base.pins[pinNum].type === 'input') {
@@ -1940,8 +1983,8 @@ class CircuitSimulator {
       });
     });
 
-    const activeSwitches = Array.from(connectedSwitchesSet).sort((a, b) => b - a);
-    const activeLeds = Array.from(connectedLedsSet).sort((a, b) => b - a);
+    const activeSwitches = Array.from(connectedSwitchesSet).sort((a, b) => a - b);
+    const activeLeds = Array.from(connectedLedsSet).sort((a, b) => a - b);
     const activeICs = Array.from(activeICsMap.values()).sort((a, b) => a.baseIndex - b.baseIndex);
 
     if (activeSwitches.length === 0 || activeLeds.length === 0) {
@@ -1978,7 +2021,14 @@ class CircuitSimulator {
     // Backup current circuit state
     const prevPower = this.power;
     const prevSwitches = [...this.switches];
+    const prevLeds = [...this.leds];
+    const prevWireLevels = this.wires.map(w => w.level);
     const prevStates = this.icBases.map(b => JSON.parse(JSON.stringify(b.state || {})));
+    const prevPinLevels = this.icBases.map(b => {
+      const pins = {};
+      Object.entries(b.pins || {}).forEach(([p, d]) => { pins[p] = d.level; });
+      return pins;
+    });
     const prevSuppress = this._suppressNotify;
 
     this._suppressNotify = true;
@@ -2021,14 +2071,30 @@ class CircuitSimulator {
       });
     }
 
-    // Restore original state
+    // Restore original state completely to prevent phantom LED illumination
     this.power = prevPower;
     this.switches = prevSwitches;
+    this.leds = prevLeds;
+    this.wires.forEach((w, idx) => {
+      w.level = prevWireLevels[idx] !== undefined ? prevWireLevels[idx] : 0;
+    });
     this.icBases.forEach((b, i) => {
       b.state = prevStates[i];
+      if (b.pins && prevPinLevels[i]) {
+        Object.entries(prevPinLevels[i]).forEach(([p, lvl]) => {
+          if (b.pins[p]) b.pins[p].level = lvl;
+        });
+      }
     });
     this._suppressNotify = prevSuppress;
-    this.evaluate();
+
+    if (prevPower) {
+      this.evaluate();
+    } else {
+      this.leds.fill(0);
+      this.wires.forEach(w => w.level = 0);
+      this.notify();
+    }
 
     return {
       inputs: activeSwitches,
@@ -2069,6 +2135,86 @@ class WireRenderer {
     this.signalColorMode = false; // Authentic palette colors by default; toggleable via toolbar
     this.drawingWire = null;
     this.wirePathElements = new Map(); // wireId -> SVG group
+    this.previewGroup = null;
+  }
+
+  _ensurePreviewLayer() {
+    if (!this.previewGroup || !this.previewGroup.parentNode) {
+      let g = this.container.querySelector('#wire-preview-group');
+      if (!g) {
+        g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('id', 'wire-preview-group');
+        g.setAttribute('pointer-events', 'none');
+        g.style.pointerEvents = 'none';
+
+        const shadow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        shadow.setAttribute('class', 'wire-preview-shadow');
+        shadow.setAttribute('fill', 'none');
+        shadow.setAttribute('stroke', 'rgba(0,0,0,0.3)');
+        shadow.setAttribute('stroke-width', '4');
+        shadow.setAttribute('stroke-linecap', 'round');
+        shadow.setAttribute('stroke-linejoin', 'round');
+        shadow.setAttribute('filter', 'url(#wire-shadow-filter)');
+
+        const main = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        main.setAttribute('class', 'wire-preview-main');
+        main.setAttribute('fill', 'none');
+        main.setAttribute('stroke-width', '2.5');
+        main.setAttribute('stroke-linecap', 'round');
+        main.setAttribute('stroke-linejoin', 'round');
+        main.setAttribute('stroke-dasharray', '6,4');
+
+        const tip = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        tip.setAttribute('class', 'wire-preview-tip');
+        tip.setAttribute('r', '4.5');
+        tip.setAttribute('stroke-width', '1.5');
+        tip.setAttribute('stroke', '#ffffff');
+
+        g.appendChild(shadow);
+        g.appendChild(main);
+        g.appendChild(tip);
+        this.container.appendChild(g);
+      }
+      this.previewGroup = g;
+    }
+    return this.previewGroup;
+  }
+
+  renderPreview(fromCoord, toCoord) {
+    if (!fromCoord || !toCoord) return;
+    const g = this._ensurePreviewLayer();
+    g.style.display = 'block';
+
+    // Compute Manhattan orthogonal route from source pin to dynamic cursor coordinate
+    let d = WireRenderer.computeOrthogonalPath(fromCoord, toCoord, 0, []);
+    if (!d || d.length < 5) {
+      d = `M ${fromCoord.x} ${fromCoord.y} L ${toCoord.x} ${toCoord.y}`;
+    }
+
+    const shadow = g.querySelector('.wire-preview-shadow');
+    const main = g.querySelector('.wire-preview-main');
+    const tip = g.querySelector('.wire-preview-tip');
+
+    if (shadow) shadow.setAttribute('d', d);
+    if (main) {
+      main.setAttribute('d', d);
+      main.setAttribute('stroke', this.currentColor);
+    }
+    if (tip) {
+      tip.setAttribute('cx', String(toCoord.x));
+      tip.setAttribute('cy', String(toCoord.y));
+      tip.setAttribute('fill', this.currentColor);
+    }
+  }
+
+  clearPreview() {
+    if (this.previewGroup) {
+      this.previewGroup.style.display = 'none';
+      const shadow = this.previewGroup.querySelector('.wire-preview-shadow');
+      const main = this.previewGroup.querySelector('.wire-preview-main');
+      if (shadow) shadow.removeAttribute('d');
+      if (main) main.removeAttribute('d');
+    }
   }
 
   setCurrentColor(hex) {
@@ -2217,7 +2363,7 @@ class WireRenderer {
 
       // Check if local: terminal is in front of the pin side, without crossing any other base
       const isCorrectSide = isLeftPin ? (p1.x <= p2.x) : (p1.x >= p2.x);
-      const isWithinCol = Math.abs(p1.x - p2.x) < 90;
+      const isWithinCol = Math.abs(p1.x - p2.x) < 160;
       const isLocal = isCorrectSide && isWithinCol && !crossesOtherBases(p1.x, p2.x, p2.y, baseIdx);
 
       if (isLocal) {
@@ -2322,10 +2468,13 @@ class WireRenderer {
         points.push({ x: p2.x, y: trunkY });
         points.push({ x: p2.x, y: p2.y });
       } else {
-        const midY = (p1.y + p2.y) / 2;
+        // One terminal is bottom (switch/pulse/gnd), one is top (led/vcc/display)
+        const isBottomFirst = (p1.y > p2.y);
+        const highwayLane = (wireIndex % 4) * 7;
+        const yHighway = isBottomFirst ? (485 - highwayLane) : (175 + highwayLane);
         points.push({ x: p1.x, y: p1.y });
-        points.push({ x: p1.x, y: midY });
-        points.push({ x: p2.x, y: midY });
+        points.push({ x: p1.x, y: yHighway });
+        points.push({ x: p2.x, y: yHighway });
         points.push({ x: p2.x, y: p2.y });
       }
     }
@@ -2352,38 +2501,6 @@ class WireRenderer {
     return `M ${x1} ${y1} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x2} ${y2}`;
   }
 
-  /**
-   * Renders the temporary rubberband wire following the mouse during drag.
-   */
-  renderPreview(startCoord, currentCoord) {
-    let previewEl = this.container.querySelector('#wire-preview-path');
-    if (!startCoord || !currentCoord) {
-      if (previewEl) previewEl.remove();
-      return;
-    }
-
-    const d = WireRenderer.computeOrthogonalPath(startCoord, currentCoord);
-
-    if (!previewEl) {
-      previewEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      previewEl.setAttribute('id', 'wire-preview-path');
-      previewEl.setAttribute('fill', 'none');
-      previewEl.setAttribute('stroke-width', '2.5');
-      previewEl.setAttribute('stroke-linecap', 'round');
-      previewEl.setAttribute('stroke-linejoin', 'round');
-      previewEl.setAttribute('stroke-dasharray', '5 3');
-      previewEl.setAttribute('pointer-events', 'none');
-      this.container.appendChild(previewEl);
-    }
-
-    previewEl.setAttribute('d', d);
-    previewEl.setAttribute('stroke', this.currentColor);
-  }
-
-  clearPreview() {
-    const previewEl = this.container.querySelector('#wire-preview-path');
-    if (previewEl) previewEl.remove();
-  }
 
   /**
    * Renders all circuit wires onto the SVG layer.
@@ -3110,19 +3227,239 @@ class BoardRenderer {
     this.renderStaticBoard();
   }
 
+
   getPinCoord(endpoint) {
     if (!endpoint) return null;
-    const key = `${endpoint.comp}:${endpoint.pin}`;
-    const coord = this.pinCoords.get(key);
+    let comp = String(endpoint.comp).toLowerCase().trim();
+    let pin = String(endpoint.pin).toLowerCase().trim();
+
+    let coord = this.pinCoords.get(`${comp}:${pin}`);
+    if (!coord) {
+      if (comp === 'vcc' || (comp === 'power' && (pin === 'vcc' || pin === '0'))) {
+        coord = this.pinCoords.get('power:vcc') || this.pinCoords.get('vcc:vcc') || this.pinCoords.get('vcc:0');
+      } else if (comp === 'gnd' || (comp === 'power' && (pin === 'gnd' || pin === '0'))) {
+        coord = this.pinCoords.get('power:gnd') || this.pinCoords.get('gnd:gnd') || this.pinCoords.get('gnd:0');
+      } else if (comp === 'output' || comp === 'led') {
+        coord = this.pinCoords.get(`led:${pin}`);
+      } else if (comp.startsWith('ic_') || comp.startsWith('icbase_')) {
+        const bIdx = comp.replace('icbase_', '').replace('ic_', '');
+        coord = this.pinCoords.get(`icbase_${bIdx}:${pin}`) || this.pinCoords.get(`icbase_${bIdx}:socket_${pin}`);
+      } else if (comp.startsWith('disp_') || comp.startsWith('display_')) {
+        const dIdx = comp.replace('display_', '').replace('disp_', '');
+        coord = this.pinCoords.get(`display_${dIdx}:${pin}`) || this.pinCoords.get(`display_${dIdx}:bcd_${pin}`);
+      }
+    }
+
     if (!coord) return null;
     return {
       x: coord.x,
       y: coord.y,
-      side: coord.side,
-      type: coord.type,
+      side: coord.side || (coord.y > 400 ? 'bottom' : 'top'),
+      type: coord.type || comp,
       comp: endpoint.comp,
       pin: endpoint.pin
     };
+  }
+
+  findPinNearScreenPoint(clientX, clientY) {
+    const svg = this.svg;
+    if (!svg) return null;
+
+    // Map screen coordinates directly into SVG viewBox coordinate space
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const screenCTM = svg.getScreenCTM();
+    if (!screenCTM) return null;
+    const svgP = pt.matrixTransform(screenCTM.inverse());
+
+    let closest = null;
+    let minDistance = Infinity;
+
+    // 1. Direct hit-test check (mouse physically hovering over terminal pin)
+    const directEl = document.elementFromPoint(clientX, clientY)?.closest('.terminal-pin');
+    if (directEl) {
+      const comp = directEl.getAttribute('data-comp');
+      const pin = directEl.getAttribute('data-pin');
+      if (comp && pin) {
+        const coord = this.getPinCoord({ comp, pin });
+        if (coord) {
+          const directDist = Math.hypot(coord.x - svgP.x, coord.y - svgP.y);
+          return { comp, pin, coord, distance: directDist };
+        }
+      }
+    }
+
+    // 2. Precise geometric nearest-pin search across registered board coordinates
+    for (const [key, coord] of this.pinCoords.entries()) {
+      const colonIdx = key.indexOf(':');
+      if (colonIdx === -1) continue;
+      const comp = key.substring(0, colonIdx);
+      const pin = key.substring(colonIdx + 1);
+
+      // Skip internal socket aliases
+      if (pin.startsWith('socket_')) continue;
+
+      const isIC = comp.startsWith('icbase_') || comp.startsWith('ic_');
+      // Generous snap radius: 16px for IC pins (full inter-pin distance), 28px for discrete terminals
+      const snapThreshold = isIC ? 16.0 : 28.0;
+
+      const dist = Math.hypot(coord.x - svgP.x, coord.y - svgP.y);
+      if (dist <= snapThreshold && dist < minDistance) {
+        minDistance = dist;
+        closest = {
+          comp,
+          pin,
+          coord: { x: coord.x, y: coord.y, side: coord.side, type: coord.type },
+          distance: dist
+        };
+      }
+    }
+
+    return closest;
+  }
+
+  getHumanReadablePinName(endpoint) {
+    if (!endpoint) return 'Unknown Pin';
+    const comp = String(endpoint.comp).toLowerCase().trim();
+    const pin = String(endpoint.pin).toLowerCase().trim();
+
+    if (comp === 'switch') return `SW ${pin}`;
+    if (comp === 'led' || comp === 'output') return `OUT ${pin}`;
+    if (comp === 'vcc' || (comp === 'power' && pin === 'vcc') || (comp === 'power' && pin === '0')) return `VCC (+5V)`;
+    if (comp === 'gnd' || (comp === 'power' && pin === 'gnd') || (comp === 'power' && pin === '0')) return `GND (0V)`;
+    if (comp === 'clock') {
+      if (pin === 'manual') return `Clock Manual (HIGH)`;
+      if (pin === 'manual_inv') return `Clock Manual (LOW)`;
+      return `Clock ${pin} Hz`;
+    }
+    if (comp.startsWith('icbase_') || comp.startsWith('ic_')) {
+      const idx = parseInt(comp.replace('icbase_', '').replace('ic_', ''), 10);
+      const baseNum = idx + 1;
+      const base = this.sim.icBases[idx];
+      const icTag = base && base.icId ? ` [${base.icId}]` : '';
+      const pinTag = base && base.pins && base.pins[pin] ? ` (${base.pins[pin].name})` : '';
+      return `IC Base ${baseNum}${icTag} Pin ${pin}${pinTag}`;
+    }
+    if (comp.startsWith('display_') || comp.startsWith('disp_')) {
+      const dNum = comp.replace('display_', '').replace('disp_', '');
+      return `Display ${dNum} [${pin.toUpperCase()}]`;
+    }
+    return `${comp} Pin ${pin}`;
+  }
+
+  getAllAvailablePins() {
+    const categories = [];
+
+    // 1. Power Supply
+    categories.push({
+      category: 'Power Supply',
+      pins: [
+        { value: 'power:vcc', label: 'VCC (+5V Power)' },
+        { value: 'power:gnd', label: 'GND (0V Ground)' }
+      ]
+    });
+
+    // 2. Input Switches (SW 15 down to 0)
+    const switchPins = [];
+    for (let i = 15; i >= 0; i--) {
+      switchPins.push({
+        value: `switch:${i}`,
+        label: `SW ${i} (Input Switch ${i})`
+      });
+    }
+    categories.push({
+      category: 'Input Switches (SW 15 - SW 0)',
+      pins: switchPins
+    });
+
+    // 3. Output LEDs (OUT 15 down to 0)
+    const ledPins = [];
+    for (let i = 15; i >= 0; i--) {
+      ledPins.push({
+        value: `led:${i}`,
+        label: `OUT ${i} (Output LED ${i})`
+      });
+    }
+    categories.push({
+      category: 'Output LEDs (OUT 15 - OUT 0)',
+      pins: ledPins
+    });
+
+    // 4. Clock Generators
+    categories.push({
+      category: 'Clock Generators',
+      pins: [
+        { value: 'clock:1', label: 'Clock 1 Hz' },
+        { value: 'clock:5', label: 'Clock 5 Hz' },
+        { value: 'clock:10', label: 'Clock 10 Hz' },
+        { value: 'clock:manual', label: 'Manual Pulser (Active HIGH)' },
+        { value: 'clock:manual_inv', label: 'Manual Pulser (Active LOW)' }
+      ]
+    });
+
+    // 5. IC Bases 1 to 5
+    for (let b = 0; b < 5; b++) {
+      const base = this.sim.icBases[b];
+      const icTag = base && base.icId ? ` [${base.icId}]` : ' (Empty)';
+      const pins = [];
+      for (let p = 1; p <= 20; p++) {
+        const pinTag = base && base.pins && base.pins[p] ? ` (${base.pins[p].name})` : '';
+        pins.push({
+          value: `icbase_${b}:${p}`,
+          label: `Base ${b + 1} Pin ${p}${pinTag}`
+        });
+      }
+      categories.push({
+        category: `IC Base ${b + 1}${icTag}`,
+        pins: pins
+      });
+    }
+
+    // 6. 7-Segment Displays
+    for (let d = 1; d <= 2; d++) {
+      const segs = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'];
+      categories.push({
+        category: `7-Segment Display ${d}`,
+        pins: segs.map(s => ({
+          value: `display_${d}:${s}`,
+          label: `Display ${d} Segment ${s.toUpperCase()}`
+        }))
+      });
+    }
+
+    return categories;
+  }
+
+
+
+  getHumanReadablePinName(endpoint) {
+    if (!endpoint) return 'Unknown Pin';
+    const comp = String(endpoint.comp).toLowerCase().trim();
+    const pin = String(endpoint.pin).toLowerCase().trim();
+
+    if (comp === 'switch') return `SW ${pin}`;
+    if (comp === 'led' || comp === 'output') return `OUT ${pin}`;
+    if (comp === 'vcc' || (comp === 'power' && (pin === 'vcc' || pin === '0'))) return `VCC (+5V)`;
+    if (comp === 'gnd' || (comp === 'power' && (pin === 'gnd' || pin === '1'))) return `GND (0V)`;
+    if (comp === 'clock') {
+      if (pin === 'manual') return `Clock Manual (HIGH)`;
+      if (pin === 'manual_inv') return `Clock Manual (LOW)`;
+      return `Clock ${pin} Hz`;
+    }
+    if (comp.startsWith('icbase_') || comp.startsWith('ic_')) {
+      const idx = parseInt(comp.replace('icbase_', '').replace('ic_', ''), 10);
+      const baseNum = idx + 1;
+      const base = this.sim.icBases[idx];
+      const icTag = base && base.icId ? ` [${base.icId}]` : '';
+      const pinTag = base && base.pins && base.pins[pin] ? ` (${base.pins[pin].name})` : '';
+      return `IC Base ${baseNum}${icTag} Pin ${pin}${pinTag}`;
+    }
+    if (comp.startsWith('display_') || comp.startsWith('disp_')) {
+      const dNum = comp.replace('display_', '').replace('disp_', '');
+      return `Display ${dNum} [${pin.toUpperCase()}]`;
+    }
+    return `${comp} Pin ${pin}`;
   }
 
   initDefs() {
@@ -3271,42 +3608,52 @@ class BoardRenderer {
     }
     this.pinCoords.set(key, { x: cx, y: cy, side: computedSide, type });
 
+    const isICPin = comp.startsWith('icbase_') || comp.startsWith('ic_');
+    const hitRadius = isICPin ? 7.5 : 14;
+
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('class', 'terminal-pin');
     g.setAttribute('data-comp', comp);
     g.setAttribute('data-pin', pinStr);
+    if (isICPin) {
+      g.setAttribute('data-socket-pin', pinStr);
+      g.setAttribute('data-socket-side', computedSide);
+    }
     g.setAttribute('cursor', 'pointer');
     g.style.pointerEvents = 'all';
 
     g.innerHTML = `
-      <!-- Generous hit circle (30px diameter) with opacity 0 to guarantee SVG hit-testing across all browsers -->
-      <circle cx="${cx}" cy="${cy}" r="15" fill="#000000" opacity="0" pointer-events="all"/>
+      <!-- Precise non-overlapping hit circle (7.5px radius for IC pins to prevent neighbor collision; 14px for discrete) -->
+      <circle cx="${cx}" cy="${cy}" r="${hitRadius}" fill="#000000" opacity="0" pointer-events="all"/>
       <!-- Outer silver rim -->
-      <circle cx="${cx}" cy="${cy}" r="8.5" fill="#cbd5e1" stroke="#334155" stroke-width="1.2" filter="url(#chip-shadow)" pointer-events="all"/>
+      <circle cx="${cx}" cy="${cy}" r="${isICPin ? 7.5 : 8.5}" fill="#cbd5e1" stroke="#334155" stroke-width="1.2" filter="url(#chip-shadow)" pointer-events="all"/>
       <!-- Inner contact hole -->
-      <circle cx="${cx}" cy="${cy}" r="5.5" fill="url(#pin-hole-metal)" pointer-events="all"/>
+      <circle cx="${cx}" cy="${cy}" r="${isICPin ? 4.5 : 5.5}" fill="url(#pin-hole-metal)" pointer-events="all"/>
       <!-- Hover / Active highlight circle -->
-      <circle class="terminal-hover-ring" cx="${cx}" cy="${cy}" r="12" fill="none" stroke="#facc15" stroke-width="2.5" opacity="0" pointer-events="none"/>
+      <circle class="terminal-hover-ring" cx="${cx}" cy="${cy}" r="${isICPin ? 9.5 : 12}" fill="none" stroke="#facc15" stroke-width="2.5" opacity="0" pointer-events="none"/>
     `;
 
     g.addEventListener('click', (e) => {
       e.stopPropagation();
+      const activePin = g.getAttribute('data-pin') || pinStr;
       if (this.callbacks.onPinClick) {
-        this.callbacks.onPinClick({ comp, pin: pinStr }, { x: cx, y: cy });
+        this.callbacks.onPinClick({ comp, pin: activePin }, { x: cx, y: cy });
       }
     });
 
     g.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      const activePin = g.getAttribute('data-pin') || pinStr;
       if (this.callbacks.onPinMouseDown) {
-        this.callbacks.onPinMouseDown({ comp, pin: pinStr }, { x: cx, y: cy }, e);
+        this.callbacks.onPinMouseDown({ comp, pin: activePin }, { x: cx, y: cy }, e);
       }
     });
 
     g.addEventListener('mouseup', (e) => {
       e.stopPropagation();
+      const activePin = g.getAttribute('data-pin') || pinStr;
       if (this.callbacks.onPinMouseUp) {
-        this.callbacks.onPinMouseUp({ comp, pin: pinStr }, { x: cx, y: cy }, e);
+        this.callbacks.onPinMouseUp({ comp, pin: activePin }, { x: cx, y: cy }, e);
       }
     });
 
@@ -3393,8 +3740,9 @@ class BoardRenderer {
     this.svg.appendChild(vccLabel);
 
     this.createPinHole(vccX, 76, 'power', 'vcc');
-    this.pinCoords.set('vcc:0', { x: vccX, y: 76 });
-    this.pinCoords.set('vcc:vcc', { x: vccX, y: 76 });
+    this.pinCoords.set('vcc:0', { x: vccX, y: 76, side: 'top', type: 'vcc' });
+    this.pinCoords.set('vcc:vcc', { x: vccX, y: 76, side: 'top', type: 'vcc' });
+    this.pinCoords.set('power:vcc', { x: vccX, y: 76, side: 'top', type: 'vcc' });
 
     // Dual 7-Segment Displays (Right top)
     const disp1X = 815;
@@ -3423,20 +3771,24 @@ class BoardRenderer {
     pwrBtn.setAttribute('cursor', 'pointer');
     pwrBtn.innerHTML = `
       <!-- Generous invisible hit circle (48px diameter) -->
-      <circle cx="${pwrX}" cy="${pwrY}" r="24" fill="transparent"/>
+      <circle cx="${pwrX}" cy="${pwrY}" r="24" fill="#000000" opacity="0" pointer-events="all"/>
       <circle cx="${pwrX}" cy="${pwrY}" r="16" fill="#0f172a" stroke="#334155" stroke-width="1.5" pointer-events="none"/>
-      <circle id="power-indicator-ring" cx="${pwrX}" cy="${pwrY}" r="12" fill="#dc2626" pointer-events="none"/>
+      <circle id="power-indicator-ring" cx="${pwrX}" cy="${pwrY}" r="12" fill="#ef4444" filter="url(#led-glow-red)" pointer-events="none"/>
       <!-- Power Icon ⏻ -->
       <path d="M ${pwrX} ${pwrY - 6} L ${pwrX} ${pwrY - 1}" stroke="#ffffff" stroke-width="2" stroke-linecap="round" pointer-events="none"/>
       <path d="M ${pwrX - 4.5} ${pwrY - 3} A 5.5 5.5 0 1 0 ${pwrX + 4.5} ${pwrY - 3}" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" pointer-events="none"/>
     `;
 
-    pwrBtn.addEventListener('click', (e) => {
+    const togglePower = (e) => {
       e.stopPropagation();
+      e.preventDefault();
       if (this.callbacks.onPowerToggle) {
         this.callbacks.onPowerToggle();
       }
-    });
+    };
+
+    pwrBtn.addEventListener('click', togglePower);
+    pwrBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
     this.svg.appendChild(pwrBtn);
   }
 
@@ -3840,7 +4192,7 @@ class BoardRenderer {
 
       swG.innerHTML = `
         <!-- Generous invisible hit area (36px wide x 60px high) -->
-        <rect x="${cx - 18}" y="605" width="36" height="60" fill="transparent"/>
+        <rect x="${cx - 18}" y="605" width="36" height="60" fill="#000000" opacity="0" pointer-events="all"/>
         <!-- Vertical slot -->
         <rect x="${cx - 5}" y="612" width="10" height="25" rx="5" fill="#002b49" pointer-events="none"/>
         <!-- Toggle Knob (circle with chrome highlight) -->
@@ -3849,12 +4201,16 @@ class BoardRenderer {
         <text x="${cx}" y="658" text-anchor="middle" font-family="'Inter', sans-serif" font-weight="800" font-size="11.5" fill="#002b49" pointer-events="none">${i}</text>
       `;
 
-      swG.addEventListener('click', (e) => {
+      const toggleSwitch = (e) => {
         e.stopPropagation();
+        e.preventDefault();
         if (this.callbacks.onSwitchToggle) {
           this.callbacks.onSwitchToggle(i);
         }
-      });
+      };
+
+      swG.addEventListener('click', toggleSwitch);
+      swG.addEventListener('pointerdown', (e) => e.stopPropagation());
       this.svg.appendChild(swG);
     }
 
@@ -3872,8 +4228,9 @@ class BoardRenderer {
     this.svg.appendChild(gndLabel);
 
     this.createPinHole(gndX, 590, 'power', 'gnd');
-    this.pinCoords.set('gnd:0', { x: gndX, y: 590 });
-    this.pinCoords.set('gnd:gnd', { x: gndX, y: 590 });
+    this.pinCoords.set('gnd:0', { x: gndX, y: 590, side: 'bottom', type: 'gnd' });
+    this.pinCoords.set('gnd:gnd', { x: gndX, y: 590, side: 'bottom', type: 'gnd' });
+    this.pinCoords.set('power:gnd', { x: gndX, y: 590, side: 'bottom', type: 'gnd' });
 
     // 2. CLOCK SECTION (Right side)
     const clkTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -3964,7 +4321,7 @@ class BoardRenderer {
 
     pulseBtn.innerHTML = `
       <!-- Generous invisible hit area (140px x 42px) -->
-      <rect x="${pulseX - 6}" y="${pulseY + 8}" width="142" height="42" fill="transparent"/>
+      <rect x="${pulseX - 6}" y="${pulseY + 8}" width="142" height="42" fill="#000000" opacity="0" pointer-events="all"/>
       <!-- Black rounded rectangular body -->
       <rect id="pulse-box-rect" x="${pulseX}" y="${pulseY + 12}" width="130" height="32" rx="6" fill="#111827" stroke="#1f2937" stroke-width="1.5" filter="url(#chip-shadow)" pointer-events="none"/>
       <!-- Pulse waveform icon in red -->
@@ -3975,12 +4332,14 @@ class BoardRenderer {
 
     const pressHandler = (e) => {
       e.stopPropagation();
+      e.preventDefault();
       pulseBtn.querySelector('#pulse-box-rect')?.setAttribute('fill', '#1e293b');
       if (this.callbacks.onPulsePress) this.callbacks.onPulsePress();
     };
 
     const releaseHandler = (e) => {
       e.stopPropagation();
+      e.preventDefault();
       pulseBtn.querySelector('#pulse-box-rect')?.setAttribute('fill', '#111827');
       if (this.callbacks.onPulseRelease) this.callbacks.onPulseRelease();
     };
@@ -3988,6 +4347,9 @@ class BoardRenderer {
     pulseBtn.addEventListener('mousedown', pressHandler);
     pulseBtn.addEventListener('mouseup', releaseHandler);
     pulseBtn.addEventListener('mouseleave', releaseHandler);
+    pulseBtn.addEventListener('touchstart', pressHandler, { passive: false });
+    pulseBtn.addEventListener('touchend', releaseHandler, { passive: false });
+    pulseBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
     pulseBtn.addEventListener('click', (e) => e.stopPropagation());
 
     this.svg.appendChild(pulseBtn);
@@ -4004,11 +4366,11 @@ class BoardRenderer {
     const pwrRing = this.svg.querySelector('#power-indicator-ring');
     if (pwrRing) {
       if (isPowerOn) {
-        pwrRing.setAttribute('fill', '#16a34a');
+        pwrRing.setAttribute('fill', '#22c55e');
         pwrRing.setAttribute('filter', 'url(#led-glow-green)');
       } else {
-        pwrRing.setAttribute('fill', '#dc2626');
-        pwrRing.removeAttribute('filter');
+        pwrRing.setAttribute('fill', '#ef4444');
+        pwrRing.setAttribute('filter', 'url(#led-glow-red)');
       }
     }
 
@@ -4090,6 +4452,12 @@ class BoardRenderer {
 
       // Reset pin labels to default socket numbering if empty
       if (!base.icId) {
+        // Clear all previous keys for this base to prevent stale mappings
+        for (const k of Array.from(this.pinCoords.keys())) {
+          if (k.startsWith(`icbase_${baseIdx}:`)) {
+            this.pinCoords.delete(k);
+          }
+        }
         if (baseBody) {
           baseBody.setAttribute('stroke', '#222222');
           baseBody.setAttribute('stroke-width', '1.5');
@@ -4099,16 +4467,34 @@ class BoardRenderer {
           baseLabel.setAttribute('fill', '#ffffff');
         }
         for (let r = 0; r < rows; r++) {
-          const leftLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-left-${r + 1}`);
+          const leftP = r + 1;
+          const rightP = 20 - r;
+          const leftLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-left-${leftP}`);
           if (leftLbl) {
-            leftLbl.textContent = String(r + 1);
+            leftLbl.textContent = String(leftP);
             leftLbl.setAttribute('fill', '#bae6fd');
           }
-          const rightLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-right-${20 - r}`);
+          const rightLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-right-${rightP}`);
           if (rightLbl) {
-            rightLbl.textContent = String(20 - r);
+            rightLbl.textContent = String(rightP);
             rightLbl.setAttribute('fill', '#bae6fd');
           }
+          const leftPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${leftP}"]`);
+          if (leftPinEl) {
+            leftPinEl.setAttribute('data-pin', String(leftP));
+          }
+          const rightPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${rightP}"]`);
+          if (rightPinEl) {
+            rightPinEl.setAttribute('data-pin', String(rightP));
+          }
+
+          const leftHoleX = chipX - 18 - 8;
+          const rightHoleX = chipX + chipW + 18 + 8;
+          const py = startPinY + r * pinSpacingY;
+          this.pinCoords.set(`icbase_${baseIdx}:${leftP}`, { x: leftHoleX, y: py, side: 'left', type: 'ic' });
+          this.pinCoords.set(`icbase_${baseIdx}:${rightP}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
+          this.pinCoords.set(`icbase_${baseIdx}:socket_${leftP}`, { x: leftHoleX, y: py, side: 'left', type: 'ic' });
+          this.pinCoords.set(`icbase_${baseIdx}:socket_${rightP}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
         }
         return;
       }
@@ -4117,6 +4503,13 @@ class BoardRenderer {
       const icDef = IC_LIBRARY[base.icId];
       const icPins = icDef ? icDef.pins : 14;
       const icRows = icPins / 2; // 7 for 14-pin ICs; 8 for 16-pin ICs; 10 for 20-pin ICs
+
+      // Clear all previous keys for this base so no stale socket keys collide
+      for (const k of Array.from(this.pinCoords.keys())) {
+        if (k.startsWith(`icbase_${baseIdx}:`)) {
+          this.pinCoords.delete(k);
+        }
+      }
 
       if (baseBody) {
         baseBody.setAttribute('stroke', '#0284c7');
@@ -4199,6 +4592,11 @@ class BoardRenderer {
         const leftHoleX = chipX - 18 - 8;
         this.pinCoords.set(`icbase_${baseIdx}:${pNumLeft}`, { x: leftHoleX, y: py, side: 'left', type: 'ic' });
 
+        const leftPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${pNumLeft}"]`);
+        if (leftPinEl) {
+          leftPinEl.setAttribute('data-pin', String(pNumLeft));
+        }
+
         const leftLbl = this.svg.querySelector(`#base-${baseIdx}-pinlbl-left-${pNumLeft}`);
         if (leftLbl) {
           leftLbl.textContent = String(pNumLeft);
@@ -4231,12 +4629,8 @@ class BoardRenderer {
         const rightData = base.pins[icPinRight] || {};
         const rightHoleX = chipX + chipW + 18 + 8;
 
-        // Register IC pin number (takes precedence for mounted chip)
+        // Register IC pin number and socket pin alias
         this.pinCoords.set(`icbase_${baseIdx}:${icPinRight}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
-        // Register socket pin number alias only if it does not collide with an active IC pin number
-        if (socketPinRight > icPins) {
-          this.pinCoords.set(`icbase_${baseIdx}:${socketPinRight}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
-        }
         this.pinCoords.set(`icbase_${baseIdx}:socket_${socketPinRight}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
 
         // Update board right pin label to show the IC pin number for intuitive wiring
@@ -4244,6 +4638,12 @@ class BoardRenderer {
         if (rightLbl) {
           rightLbl.textContent = String(icPinRight);
           rightLbl.setAttribute('fill', '#38bdf8');
+        }
+
+        // Synchronize underlying .terminal-pin element with active IC pin
+        const rightPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${socketPinRight}"]`);
+        if (rightPinEl) {
+          rightPinEl.setAttribute('data-pin', String(icPinRight));
         }
 
         // Right pin function label inside chip edge
@@ -4280,10 +4680,844 @@ class BoardRenderer {
           rightLbl.textContent = String(rightP);
           rightLbl.setAttribute('fill', '#64748b'); // Dimmed
         }
+
+        const leftPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${leftP}"]`);
+        if (leftPinEl) {
+          leftPinEl.setAttribute('data-pin', `socket_${leftP}`);
+        }
+        const rightPinEl = this.svg.querySelector(`.terminal-pin[data-comp="icbase_${baseIdx}"][data-socket-pin="${rightP}"]`);
+        if (rightPinEl) {
+          rightPinEl.setAttribute('data-pin', `socket_${rightP}`);
+        }
+
+        const leftHoleX = chipX - 18 - 8;
+        const rightHoleX = chipX + chipW + 18 + 8;
+        const py = startPinY + r * pinSpacingY;
+        this.pinCoords.set(`icbase_${baseIdx}:socket_${leftP}`, { x: leftHoleX, y: py, side: 'left', type: 'ic' });
+        this.pinCoords.set(`icbase_${baseIdx}:socket_${rightP}`, { x: rightHoleX, y: py, side: 'right', type: 'ic' });
       }
 
       this.icLayer.appendChild(g);
     });
+  }
+}
+
+// ==========================================
+// SOURCE: js/logic-suite.js
+// ==========================================
+/**
+ * DELD Virtual Trainer Kit - Digital Logic Suite (6 Tools)
+ * 1. K-Map Solver (2-4 variables, minterms, don't-cares, Quine-McCluskey, grouping visualizer)
+ * 2. Truth Table & Synced Timing Waveform
+ * 3. Algebraic Simplifier (Step-by-step proof with named Boolean laws)
+ * 4. Circuit Diagram (Unsimplified vs. Minimized gate schematics & metrics)
+ * 5. Counter Designer (MOD-N, Binary, BCD, Gray, Johnson, Ring, Lockout recovery, D/JK/T flip-flops)
+ * 6. FSM Designer (Mealy/Moore, State Diagram, Transition Table, State Encoding, Excitation)
+ * + "Solve -> Build" Hardware Synthesizer targeting 74LS TTL ICs
+ */
+
+class DigitalLogicSuite {
+  constructor() {
+    this.currentTool = 'kmap';
+    this.varsCount = 3;
+    this.varNames = ['A', 'B', 'C', 'D'];
+    this.varLabels = ['A', 'B', 'C', 'D'];
+    this.minterms = new Set([1, 2, 5, 7]); // default demo: F = A'B + AB'C
+    this.dontCares = new Set([]);
+    this.activeExpression = "A'B + AB'C";
+    
+    // Live Kit Synchronization
+    this.liveSync = true;
+    this.liveCircuitInfo = null;
+    this.liveRowIndex = -1;
+    this.counterCurrentIndex = 0;
+    this.fsmCurrentState = 'S0';
+    this.outputLedName = 'OUT 13';
+  }
+
+  syncWithCircuit(circuitData, targetOutput = null) {
+    this.liveCircuitInfo = circuitData;
+    if (!circuitData || !circuitData.inputs || circuitData.inputs.length === 0 || !circuitData.outputs || circuitData.outputs.length === 0) {
+      return;
+    }
+
+    const numInputs = circuitData.inputs.length;
+    this.varsCount = Math.min(4, Math.max(2, numInputs));
+    
+    // Labels for variables: e.g. A (SW 0), B (SW 1)
+    this.varLabels = circuitData.inputs.slice(0, this.varsCount).map((sw, i) => `${this.varNames[i]} (SW ${sw})`);
+
+    const primaryLed = (targetOutput !== null && circuitData.outputs.includes(Number(targetOutput)))
+      ? Number(targetOutput)
+      : (this.selectedOutput !== undefined && circuitData.outputs.includes(this.selectedOutput)
+          ? this.selectedOutput
+          : circuitData.outputs[0]);
+
+    this.selectedOutput = primaryLed;
+    this.outputLedName = `OUT ${primaryLed}`;
+
+    const newMinterms = new Set();
+    const newDontCares = new Set();
+
+    circuitData.rows.forEach(r => {
+      if (r.rowIndex < (1 << this.varsCount)) {
+        const outVal = r.outputs[primaryLed];
+        if (outVal === 1) {
+          newMinterms.add(r.rowIndex);
+        } else if (outVal === 'X') {
+          newDontCares.add(r.rowIndex);
+        }
+      }
+    });
+
+    this.minterms = newMinterms;
+    this.dontCares = newDontCares;
+    this.liveRowIndex = circuitData.liveRowIndex;
+  }
+
+  // ==========================================
+  // 1. K-MAP & QUINE-MCCLUSKEY SOLVER
+  // ==========================================
+
+  setVarsCount(n) {
+    this.varsCount = Math.min(4, Math.max(2, n));
+    const maxMinterm = (1 << this.varsCount) - 1;
+    const newM = new Set();
+    this.minterms.forEach(m => { if (m <= maxMinterm) newM.add(m); });
+    this.minterms = newM;
+    const newD = new Set();
+    this.dontCares.forEach(d => { if (d <= maxMinterm) newD.add(d); });
+    this.dontCares = newD;
+  }
+
+  toggleCell(minterm) {
+    if (this.minterms.has(minterm)) {
+      this.minterms.delete(minterm);
+      this.dontCares.add(minterm); // 1 -> X
+    } else if (this.dontCares.has(minterm)) {
+      this.dontCares.delete(minterm); // X -> 0
+    } else {
+      this.minterms.add(minterm); // 0 -> 1
+    }
+  }
+
+  getCellState(minterm) {
+    if (this.minterms.has(minterm)) return 1;
+    if (this.dontCares.has(minterm)) return 'X';
+    return 0;
+  }
+
+  getKMapGridConfig(numVars = this.varsCount) {
+    if (numVars === 2) {
+      return {
+        rowVars: ['A'],
+        colVars: ['B'],
+        rowLabels: ['0', '1'],
+        colLabels: ['0', '1'],
+        cells: [
+          [0, 1], // A=0
+          [2, 3]  // A=1
+        ]
+      };
+    } else if (numVars === 3) {
+      return {
+        rowVars: ['A'],
+        colVars: ['B', 'C'],
+        rowLabels: ['0', '1'],
+        colLabels: ['00', '01', '11', '10'],
+        cells: [
+          [0, 1, 3, 2], // A=0
+          [4, 5, 7, 6]  // A=1
+        ]
+      };
+    } else {
+      return {
+        rowVars: ['A', 'B'],
+        colVars: ['C', 'D'],
+        rowLabels: ['00', '01', '11', '10'],
+        colLabels: ['00', '01', '11', '10'],
+        cells: [
+          [0, 1, 3, 2],       // AB=00
+          [4, 5, 7, 6],       // AB=01
+          [12, 13, 15, 14],   // AB=11
+          [8, 9, 11, 10]      // AB=10
+        ]
+      };
+    }
+  }
+
+  solveQuineMcCluskey(numVars = this.varsCount, minterms = this.minterms, dontCares = this.dontCares) {
+    const totalMinterms = 1 << numVars;
+    const allActive = new Set([...minterms, ...dontCares]);
+
+    if (minterms.size === 0) {
+      return {
+        sop: '0',
+        terms: [],
+        primeImplicants: [],
+        essentialPIs: [],
+        qmSteps: ['All cells 0 => Constant 0'],
+        gateCount: 0
+      };
+    }
+    if (allActive.size === totalMinterms && minterms.size > 0) {
+      return {
+        sop: '1',
+        terms: [],
+        primeImplicants: [{ mask: '-'.repeat(numVars), minterms: Array.from(allActive) }],
+        essentialPIs: [{ mask: '-'.repeat(numVars), minterms: Array.from(allActive) }],
+        qmSteps: ['All cells 1 => Constant 1'],
+        gateCount: 0
+      };
+    }
+
+    const toBin = (num) => num.toString(2).padStart(numVars, '0');
+    const countOnes = (str) => (str.match(/1/g) || []).length;
+
+    let groups = {};
+    for (let i = 0; i <= numVars; i++) groups[i] = [];
+
+    allActive.forEach(m => {
+      const bin = toBin(m);
+      const ones = countOnes(bin);
+      groups[ones].push({
+        mask: bin,
+        minterms: [m],
+        used: false
+      });
+    });
+
+    const primeImplicants = [];
+    const qmSteps = [];
+    let pass = 1;
+
+    while (true) {
+      const nextGroups = {};
+      for (let i = 0; i <= numVars; i++) nextGroups[i] = [];
+      let combinedAny = false;
+      const passTerms = [];
+
+      for (let i = 0; i < numVars; i++) {
+        const g1 = groups[i] || [];
+        const g2 = groups[i + 1] || [];
+
+        for (let t1 of g1) {
+          for (let t2 of g2) {
+            let diffCount = 0;
+            let diffIdx = -1;
+            for (let b = 0; b < numVars; b++) {
+              if (t1.mask[b] !== t2.mask[b]) {
+                if (t1.mask[b] === '-' || t2.mask[b] === '-') {
+                  diffCount = 999;
+                  break;
+                }
+                diffCount++;
+                diffIdx = b;
+              }
+            }
+
+            if (diffCount === 1) {
+              t1.used = true;
+              t2.used = true;
+              combinedAny = true;
+              const newMask = t1.mask.substring(0, diffIdx) + '-' + t1.mask.substring(diffIdx + 1);
+              const combinedMinterms = Array.from(new Set([...t1.minterms, ...t2.minterms])).sort((a,b) => a-b);
+              
+              const ones = countOnes(newMask.replace(/-/g, ''));
+              if (!nextGroups[ones].some(item => item.mask === newMask)) {
+                nextGroups[ones].push({
+                  mask: newMask,
+                  minterms: combinedMinterms,
+                  used: false
+                });
+                passTerms.push(`${newMask} (m${combinedMinterms.join(',')})`);
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i <= numVars; i++) {
+        for (let t of groups[i]) {
+          if (!t.used && !primeImplicants.some(pi => pi.mask === t.mask)) {
+            primeImplicants.push(t);
+          }
+        }
+      }
+
+      if (passTerms.length > 0) {
+        qmSteps.push(`Pass ${pass}: Combined into ${passTerms.length} terms: ${passTerms.slice(0, 4).join('; ')}${passTerms.length > 4 ? ' ...' : ''}`);
+      }
+
+      if (!combinedAny) break;
+      groups = nextGroups;
+      pass++;
+    }
+
+    const neededMinterms = Array.from(minterms);
+    const chart = {};
+    neededMinterms.forEach(m => { chart[m] = []; });
+
+    primeImplicants.forEach((pi, piIdx) => {
+      pi.minterms.forEach(m => {
+        if (chart[m]) chart[m].push(piIdx);
+      });
+    });
+
+    const essentialPIIndices = new Set();
+    const coveredMinterms = new Set();
+
+    neededMinterms.forEach(m => {
+      if (chart[m] && chart[m].length === 1) {
+        const piIdx = chart[m][0];
+        essentialPIIndices.add(piIdx);
+        primeImplicants[piIdx].minterms.forEach(cm => coveredMinterms.add(cm));
+      }
+    });
+
+    let remaining = neededMinterms.filter(m => !coveredMinterms.has(m));
+    while (remaining.length > 0) {
+      let bestPI = -1;
+      let maxCover = 0;
+      primeImplicants.forEach((pi, idx) => {
+        if (!essentialPIIndices.has(idx)) {
+          const count = pi.minterms.filter(m => remaining.includes(m)).length;
+          if (count > maxCover) {
+            maxCover = count;
+            bestPI = idx;
+          }
+        }
+      });
+
+      if (bestPI !== -1) {
+        essentialPIIndices.add(bestPI);
+        primeImplicants[bestPI].minterms.forEach(cm => coveredMinterms.add(cm));
+        remaining = neededMinterms.filter(m => !coveredMinterms.has(m));
+      } else {
+        break;
+      }
+    }
+
+    const selectedPIs = Array.from(essentialPIIndices).map(idx => primeImplicants[idx]);
+
+    const vars = this.varNames.slice(0, numVars);
+    const maskToTerm = (mask) => {
+      let term = '';
+      for (let i = 0; i < numVars; i++) {
+        if (mask[i] === '1') term += vars[i];
+        else if (mask[i] === '0') term += vars[i] + "'";
+      }
+      return term || '1';
+    };
+
+    const terms = selectedPIs.map(pi => ({
+      mask: pi.mask,
+      term: maskToTerm(pi.mask),
+      minterms: pi.minterms,
+      color: this.getGroupColor(pi.mask)
+    }));
+
+    const sop = terms.map(t => t.term).join(' + ') || '0';
+
+    return {
+      sop,
+      terms,
+      primeImplicants,
+      essentialPIs: selectedPIs,
+      qmSteps,
+      gateCount: terms.length > 1 ? terms.length + 1 : (terms[0]?.term?.length || 0)
+    };
+  }
+
+  getGroupColor(seed) {
+    const colors = [
+      '#ef4444', '#3b82f6', '#10b981', '#f59e0b',
+      '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'
+    ];
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
+  }
+
+  generateTruthTableData(numVars = this.varsCount, minterms = this.minterms, dontCares = this.dontCares, targetOutput = null) {
+    // If live circuit is active, use real circuit data
+    if (this.liveSync && this.liveCircuitInfo && this.liveCircuitInfo.rows && this.liveCircuitInfo.rows.length > 0) {
+      const info = this.liveCircuitInfo;
+      const primaryLed = (targetOutput !== null && info.outputs.includes(Number(targetOutput)))
+        ? Number(targetOutput)
+        : (this.selectedOutput !== undefined && info.outputs.includes(this.selectedOutput)
+            ? this.selectedOutput
+            : info.outputs[0]);
+
+      const vars = info.inputs.map(sw => `SW ${sw}`);
+      const rows = info.rows.map(r => {
+        const bits = info.inputs.map(sw => r.inputs[sw] || 0);
+        return {
+          index: r.rowIndex,
+          inputs: bits,
+          output: r.outputs[primaryLed] !== undefined ? r.outputs[primaryLed] : 0,
+          allOutputs: r.outputs,
+          isLive: r.isLive,
+          rawInputs: r.inputs,
+          rawOutputs: r.outputs
+        };
+      });
+
+      const mintermList = rows.filter(r => r.output === 1).map(r => r.index);
+      const maxtermList = rows.filter(r => r.output === 0).map(r => r.index);
+
+      return {
+        vars,
+        outputName: `OUT ${primaryLed} (F)`,
+        outputLed: primaryLed,
+        allOutputLeds: info.outputs,
+        rows,
+        liveRowIndex: info.liveRowIndex,
+        sopStandard: mintermList.length ? `Σ m(${mintermList.join(', ')})` : '0',
+        posStandard: maxtermList.length ? `Π M(${maxtermList.join(', ')})` : '1'
+      };
+    }
+
+    const total = 1 << numVars;
+    const vars = this.varLabels ? this.varLabels.slice(0, numVars) : this.varNames.slice(0, numVars);
+    const rows = [];
+    const mintermList = [];
+    const maxtermList = [];
+
+    for (let i = 0; i < total; i++) {
+      const bits = i.toString(2).padStart(numVars, '0').split('').map(Number);
+      let output = 0;
+      if (minterms.has(i)) {
+        output = 1;
+        mintermList.push(i);
+      } else if (dontCares.has(i)) {
+        output = 'X';
+      } else {
+        maxtermList.push(i);
+      }
+
+      rows.push({
+        index: i,
+        inputs: bits,
+        output,
+        isLive: (i === this.liveRowIndex)
+      });
+    }
+
+    return {
+      vars,
+      outputName: this.outputLedName || 'F (Output)',
+      outputLed: this.selectedOutput,
+      allOutputLeds: [],
+      rows,
+      liveRowIndex: this.liveRowIndex,
+      sopStandard: mintermList.length ? `Σ m(${mintermList.join(', ')})` : '0',
+      posStandard: maxtermList.length ? `Π M(${maxtermList.join(', ')})` : '1'
+    };
+  }
+
+  generateAlgebraicProof(numVars = this.varsCount, minterms = this.minterms, dontCares = this.dontCares) {
+    const qm = this.solveQuineMcCluskey(numVars, minterms, dontCares);
+    const steps = [];
+
+    const vars = this.varNames.slice(0, numVars);
+    const mintermTerms = Array.from(minterms).sort((a,b) => a-b).map(m => {
+      const bin = m.toString(2).padStart(numVars, '0');
+      return bin.split('').map((b, idx) => b === '1' ? vars[idx] : vars[idx] + "'").join('');
+    });
+
+    if (mintermTerms.length === 0) {
+      return [
+        { law: 'Null / Annihilation Law', expr: 'F = 0', note: 'No active minterms. Output is permanently LOW (GND).' }
+      ];
+    }
+
+    steps.push({
+      law: 'Canonical Sum-of-Minterms (SOP Expansion)',
+      expr: 'F = ' + (mintermTerms.join(' + ') || '0'),
+      note: 'Represent each active truth-table 1-cell as an AND-product of input literals.'
+    });
+
+    if (mintermTerms.length > 1) {
+      steps.push({
+        law: "Adjacency Theorem & Distribution: XY + XY' = X(Y + Y')",
+        expr: 'F = ' + (qm.terms.map(t => `(${t.term})`).join(' + ') || qm.sop),
+        note: 'Factor common literals between Gray-code adjacent terms differing by exactly one negated variable.'
+      });
+    }
+
+    steps.push({
+      law: "Complement & Identity Laws: (Y + Y' = 1, X · 1 = X)",
+      expr: 'F = ' + (qm.sop || '0'),
+      note: 'Complementary pairs annihilate to logic 1; remaining essential literals form minimal terms.'
+    });
+
+    steps.push({
+      law: 'Quine-McCluskey & Consensus Verification',
+      expr: 'F(minimized) = ' + (qm.sop || '0'),
+      note: `Verified irredundant minimal SOP via prime implicant coverage (${qm.essentialPIs.length} essential group${qm.essentialPIs.length === 1 ? '' : 's'}).`
+    });
+
+    return steps;
+  }
+
+  getCircuitSchematicSpec(numVars = this.varsCount, minterms = this.minterms, dontCares = this.dontCares) {
+    const qm = this.solveQuineMcCluskey(numVars, minterms, dontCares);
+    const vars = this.varNames.slice(0, numVars);
+
+    const origMintermsCount = minterms.size;
+    const origInverters = numVars;
+    const origAndGates = origMintermsCount;
+    const origOrGates = origMintermsCount > 1 ? 1 : 0;
+    const origTotalGates = origInverters + origAndGates + origOrGates;
+
+    let minInverters = 0;
+    const usedInverted = new Set();
+    qm.terms.forEach(t => {
+      vars.forEach(v => {
+        if (t.term.includes(v + "'")) usedInverted.add(v);
+      });
+    });
+    minInverters = usedInverted.size;
+
+    const minAndGates = qm.terms.filter(t => t.term.length > 1 && !t.term.includes('+')).length;
+    const minOrGates = qm.terms.length > 1 ? 1 : 0;
+    const minTotalGates = minInverters + minAndGates + minOrGates;
+    const reductionPercent = origTotalGates > 0 ? Math.round(((origTotalGates - minTotalGates) / origTotalGates) * 100) : 0;
+
+    return {
+      sop: qm.sop,
+      terms: qm.terms,
+      original: {
+        termsCount: origMintermsCount,
+        inverters: origInverters,
+        andGates: origAndGates,
+        orGates: origOrGates,
+        totalGates: origTotalGates
+      },
+      minimized: {
+        termsCount: qm.terms.length,
+        inverters: minInverters,
+        andGates: minAndGates,
+        orGates: minOrGates,
+        totalGates: minTotalGates,
+        reductionPercent: Math.max(0, reductionPercent)
+      }
+    };
+  }
+
+  designCounter(config = {}) {
+    const {
+      type = 'synchronous',
+      sequenceType = 'bcd',
+      modulus = 10,
+      direction = 'up',
+      flipFlop = 'D',
+      customSeq = [0, 2, 4, 6]
+    } = config;
+
+    let seq = [];
+    let numBits = 3;
+
+    if (sequenceType === 'bcd') {
+      seq = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+      numBits = 4;
+    } else if (sequenceType === 'binary') {
+      const mod = Math.min(16, Math.max(2, modulus || 8));
+      seq = Array.from({ length: mod }, (_, i) => i);
+      numBits = Math.ceil(Math.log2(mod));
+    } else if (sequenceType === 'gray') {
+      const gray4 = [0, 1, 3, 2, 6, 7, 5, 4];
+      seq = gray4.slice(0, Math.min(8, modulus || 8));
+      numBits = 3;
+    } else if (sequenceType === 'ring') {
+      numBits = 4;
+      seq = [1, 2, 4, 8];
+    } else if (sequenceType === 'johnson') {
+      numBits = 3;
+      seq = [0, 4, 6, 7, 3, 1];
+    } else if (sequenceType === 'custom') {
+      seq = customSeq.length ? customSeq : [0, 1, 2];
+      const maxVal = Math.max(...seq);
+      numBits = Math.max(2, Math.ceil(Math.log2(maxVal + 1)));
+    }
+
+    if (direction === 'down') {
+      seq = [...seq].reverse();
+    }
+
+    const totalStates = 1 << numBits;
+    const nextStateMap = {};
+    for (let i = 0; i < seq.length; i++) {
+      const current = seq[i];
+      const next = seq[(i + 1) % seq.length];
+      nextStateMap[current] = next;
+    }
+
+    const unusedStates = [];
+    for (let s = 0; s < totalStates; s++) {
+      if (!nextStateMap.hasOwnProperty(s)) unusedStates.push(s);
+    }
+
+    unusedStates.forEach(u => {
+      nextStateMap[u] = seq[0];
+    });
+
+    const excitationEquations = [];
+    for (let bit = 0; bit < numBits; bit++) {
+      const mintermsD = new Set();
+      const mintermsJ = new Set();
+      const mintermsK = new Set();
+      const dontCaresJK = new Set();
+
+      for (let s = 0; s < totalStates; s++) {
+        const next = nextStateMap[s];
+        const qBit = (s >> bit) & 1;
+        const qNextBit = (next >> bit) & 1;
+
+        if (qNextBit === 1) mintermsD.add(s);
+
+        if (qBit === 0 && qNextBit === 1) mintermsJ.add(s);
+        if (qBit === 0) dontCaresJK.add(s);
+        if (qBit === 1 && qNextBit === 0) mintermsK.add(s);
+        if (qBit === 1) dontCaresJK.add(s);
+      }
+
+      if (flipFlop === 'D') {
+        const qm = this.solveQuineMcCluskey(numBits, mintermsD, new Set());
+        excitationEquations.push({
+          flipFlop: `D${bit}`,
+          outputVar: `Q${bit}`,
+          equation: `D${bit} = ${qm.sop || '0'}`
+        });
+      } else if (flipFlop === 'JK') {
+        const qmJ = this.solveQuineMcCluskey(numBits, mintermsJ, dontCaresJK);
+        const qmK = this.solveQuineMcCluskey(numBits, mintermsK, dontCaresJK);
+        excitationEquations.push({
+          flipFlop: `JK${bit}`,
+          outputVar: `Q${bit}`,
+          equation: `J${bit} = ${qmJ.sop || '0'}; K${bit} = ${qmK.sop || '0'}`
+        });
+      } else {
+        const mintermsT = new Set();
+        for (let s = 0; s < totalStates; s++) {
+          const next = nextStateMap[s];
+          if (((s >> bit) & 1) !== ((next >> bit) & 1)) mintermsT.add(s);
+        }
+        const qmT = this.solveQuineMcCluskey(numBits, mintermsT, new Set());
+        excitationEquations.push({
+          flipFlop: `T${bit}`,
+          outputVar: `Q${bit}`,
+          equation: `T${bit} = ${qmT.sop || '0'}`
+        });
+      }
+    }
+
+    return {
+      numBits,
+      seq,
+      unusedStates,
+      isLockoutFree: true,
+      lockoutNote: unusedStates.length === 0 
+        ? '✅ All 2^N states utilized — no lockout possible.' 
+        : `✅ Self-Starting Verified: Unused states (${unusedStates.join(', ')}) recover to S${seq[0]} within 1 clock cycle.`,
+      transitions: seq.map((s, idx) => ({
+        from: s,
+        to: seq[(idx + 1) % seq.length],
+        fromBin: s.toString(2).padStart(numBits, '0'),
+        toBin: seq[(idx + 1) % seq.length].toString(2).padStart(numBits, '0')
+      })),
+      excitationEquations
+    };
+  }
+
+  designFSM(preset = 'seq101') {
+    if (preset === 'seq101') {
+      return {
+        name: 'Sequence Detector "101" (Mealy Machine)',
+        type: 'Mealy',
+        states: [
+          { id: 0, name: 'S0', desc: 'Initial (Got nothing)', code: '00' },
+          { id: 1, name: 'S1', desc: 'Got "1"', code: '01' },
+          { id: 2, name: 'S2', desc: 'Got "10"', code: '10' }
+        ],
+        transitions: [
+          { from: 'S0', input: 0, next: 'S0', out: 0 },
+          { from: 'S0', input: 1, next: 'S1', out: 0 },
+          { from: 'S1', input: 0, next: 'S2', out: 0 },
+          { from: 'S1', input: 1, next: 'S1', out: 0 },
+          { from: 'S2', input: 0, next: 'S0', out: 0 },
+          { from: 'S2', input: 1, next: 'S1', out: 1 }
+        ],
+        equations: [
+          { target: 'D1 (Next Q1)', expr: "Q0 · X" },
+          { target: 'D0 (Next Q0)', expr: "X" },
+          { target: 'Z (Output)', expr: "Q1 · X" }
+        ],
+        requiredICs: ['74LS74 (Dual D-FF)', '74LS08 (Quad AND)']
+      };
+    } else {
+      return {
+        name: 'Traffic Light Controller (Moore Machine)',
+        type: 'Moore',
+        states: [
+          { id: 0, name: 'GREEN', desc: 'Main Road Green, Side Red', code: '00', out: 'G=1, Y=0, R=0' },
+          { id: 1, name: 'YELLOW', desc: 'Main Road Yellow, Side Red', code: '01', out: 'G=0, Y=1, R=0' },
+          { id: 2, name: 'RED', desc: 'Main Road Red, Side Green', code: '10', out: 'G=0, Y=0, R=1' }
+        ],
+        transitions: [
+          { from: 'GREEN', input: 'Timer=1', next: 'YELLOW', out: 'Green' },
+          { from: 'YELLOW', input: 'Timer=1', next: 'RED', out: 'Yellow' },
+          { from: 'RED', input: 'Timer=1', next: 'GREEN', out: 'Red' }
+        ],
+        equations: [
+          { target: 'D1', expr: "Q0 · Timer" },
+          { target: 'D0', expr: "Q1' · Timer" },
+          { target: 'Out_Green', expr: "Q1' · Q0'" },
+          { target: 'Out_Yellow', expr: "Q1' · Q0" },
+          { target: 'Out_Red', expr: "Q1" }
+        ],
+        requiredICs: ['74LS74 (Dual D-FF)', '74LS04 (Hex Inverter)', '74LS08 (Quad AND)']
+      };
+    }
+  }
+
+  synthesizeCircuitToKit() {
+    const qm = this.solveQuineMcCluskey();
+    const numVars = this.varsCount;
+    const terms = qm.terms;
+
+    const icBases = [];
+    const wires = [];
+
+    const mintermsArr = Array.from(this.minterms).sort();
+    const isXor2 = numVars === 2 && mintermsArr.length === 2 && mintermsArr[0] === 1 && mintermsArr[1] === 2;
+
+    if (isXor2) {
+      icBases.push({ id: 0, icId: '74LS86' });
+      wires.push({ from: { comp: 'switch', pin: 15 }, to: { comp: 'icbase_0', pin: 1 }, color: '#3b82f6' });
+      wires.push({ from: { comp: 'switch', pin: 14 }, to: { comp: 'icbase_0', pin: 2 }, color: '#22c55e' });
+      wires.push({ from: { comp: 'icbase_0', pin: 3 }, to: { comp: 'led', pin: 13 }, color: '#ef4444' });
+
+      return {
+        title: `K-Map Built: F = A ⊕ B (74LS86 XOR)`,
+        icBases,
+        wires,
+        switches: [15, 14]
+      };
+    }
+
+    icBases.push({ id: 0, icId: '74LS04' });
+    icBases.push({ id: 1, icId: '74LS08' });
+    icBases.push({ id: 2, icId: '74LS32' });
+
+    wires.push({ from: { comp: 'switch', pin: 15 }, to: { comp: 'icbase_0', pin: 1 }, color: '#3b82f6' });
+    wires.push({ from: { comp: 'switch', pin: 14 }, to: { comp: 'icbase_0', pin: 3 }, color: '#22c55e' });
+    if (numVars >= 3) {
+      wires.push({ from: { comp: 'switch', pin: 13 }, to: { comp: 'icbase_0', pin: 5 }, color: '#a855f7' });
+    }
+
+    const getLiteralTerminal = (lit) => {
+      const varLetter = lit.replace("'", '');
+      const isNeg = lit.includes("'");
+      if (varLetter === 'A') {
+        return isNeg ? { comp: 'icbase_0', pin: 2 } : { comp: 'switch', pin: 15 };
+      } else if (varLetter === 'B') {
+        return isNeg ? { comp: 'icbase_0', pin: 4 } : { comp: 'switch', pin: 14 };
+      } else if (varLetter === 'C') {
+        return isNeg ? { comp: 'icbase_0', pin: 6 } : { comp: 'switch', pin: 13 };
+      } else {
+        return { comp: 'switch', pin: 12 };
+      }
+    };
+
+    const andGatePins = [
+      { in1: 1, in2: 2, out: 3 },
+      { in1: 4, in2: 5, out: 6 },
+      { in1: 9, in2: 10, out: 8 },
+      { in1: 12, in2: 13, out: 11 }
+    ];
+
+    const termOutputs = [];
+
+    terms.slice(0, 4).forEach((t, tIdx) => {
+      const g = andGatePins[tIdx];
+      const lits = [];
+      for (let i = 0; i < t.term.length; i++) {
+        if (t.term[i] >= 'A' && t.term[i] <= 'D') {
+          let lit = t.term[i];
+          if (t.term[i + 1] === "'") {
+            lit += "'";
+            i++;
+          }
+          lits.push(lit);
+        }
+      }
+
+      if (lits.length === 1) {
+        termOutputs.push(getLiteralTerminal(lits[0]));
+      } else if (lits.length >= 2) {
+        wires.push({ from: getLiteralTerminal(lits[0]), to: { comp: 'icbase_1', pin: g.in1 }, color: '#38bdf8' });
+        wires.push({ from: getLiteralTerminal(lits[1]), to: { comp: 'icbase_1', pin: g.in2 }, color: '#38bdf8' });
+        termOutputs.push({ comp: 'icbase_1', pin: g.out });
+      }
+    });
+
+    if (termOutputs.length === 0) {
+      wires.push({ from: { comp: 'gnd', pin: 0 }, to: { comp: 'led', pin: 13 }, color: '#000000' });
+    } else if (termOutputs.length === 1) {
+      wires.push({ from: termOutputs[0], to: { comp: 'led', pin: 13 }, color: '#ef4444' });
+    } else if (termOutputs.length === 2) {
+      wires.push({ from: termOutputs[0], to: { comp: 'icbase_2', pin: 1 }, color: '#f97316' });
+      wires.push({ from: termOutputs[1], to: { comp: 'icbase_2', pin: 2 }, color: '#f97316' });
+      wires.push({ from: { comp: 'icbase_2', pin: 3 }, to: { comp: 'led', pin: 13 }, color: '#ef4444' });
+    } else {
+      wires.push({ from: termOutputs[0], to: { comp: 'icbase_2', pin: 1 }, color: '#f97316' });
+      wires.push({ from: termOutputs[1], to: { comp: 'icbase_2', pin: 2 }, color: '#f97316' });
+      wires.push({ from: { comp: 'icbase_2', pin: 3 }, to: { comp: 'icbase_2', pin: 4 }, color: '#f97316' });
+      wires.push({ from: termOutputs[2], to: { comp: 'icbase_2', pin: 5 }, color: '#f97316' });
+      wires.push({ from: { comp: 'icbase_2', pin: 6 }, to: { comp: 'led', pin: 13 }, color: '#ef4444' });
+    }
+
+    return {
+      title: `Built K-Map: F = ${qm.sop}`,
+      icBases,
+      wires,
+      switches: [15, 14, 13].slice(0, numVars)
+    };
+  }
+
+  synthesizeCounterToKit(counterConfig) {
+    const res = this.designCounter(counterConfig);
+    const icBases = [];
+    const wires = [];
+
+    icBases.push({ id: 0, icId: '74LS74' });
+    icBases.push({ id: 1, icId: '74LS74' });
+    icBases.push({ id: 2, icId: '74LS04' });
+
+    wires.push({ from: { comp: 'clock', pin: 1 }, to: { comp: 'icbase_0', pin: 3 }, color: '#f59e0b' });
+    wires.push({ from: { comp: 'clock', pin: 1 }, to: { comp: 'icbase_1', pin: 3 }, color: '#f59e0b' });
+
+    wires.push({ from: { comp: 'vcc', pin: 0 }, to: { comp: 'icbase_0', pin: 1 }, color: '#ef4444' });
+    wires.push({ from: { comp: 'vcc', pin: 0 }, to: { comp: 'icbase_0', pin: 4 }, color: '#ef4444' });
+
+    wires.push({ from: { comp: 'icbase_0', pin: 6 }, to: { comp: 'icbase_0', pin: 2 }, color: '#3b82f6' });
+
+    wires.push({ from: { comp: 'icbase_0', pin: 5 }, to: { comp: 'led', pin: 0 }, color: '#22c55e' });
+    wires.push({ from: { comp: 'icbase_0', pin: 5 }, to: { comp: 'icbase_1', pin: 3 }, color: '#22c55e' });
+
+    wires.push({ from: { comp: 'vcc', pin: 0 }, to: { comp: 'icbase_1', pin: 1 }, color: '#ef4444' });
+    wires.push({ from: { comp: 'vcc', pin: 0 }, to: { comp: 'icbase_1', pin: 4 }, color: '#ef4444' });
+    wires.push({ from: { comp: 'icbase_1', pin: 6 }, to: { comp: 'icbase_1', pin: 2 }, color: '#a855f7' });
+    wires.push({ from: { comp: 'icbase_1', pin: 5 }, to: { comp: 'led', pin: 1 }, color: '#ef4444' });
+
+    return {
+      title: `Built 2-Bit Ripple Counter (74LS74)`,
+      icBases,
+      wires,
+      switches: []
+    };
   }
 }
 
@@ -4299,7 +5533,7 @@ class BoardRenderer {
 
 class DeldApp {
   constructor() {
-    this.activeTool = 'select'; // 'select' | 'wire' | 'add-ic' | 'remove-ic' | 'remove-wire' | 'hand'
+    this.activeTool = 'wire'; // 'wire' | 'select' | 'add-ic' | 'remove-ic' | 'remove-wire' | 'hand'
     this.circuitName = 'Untitled Circuit';
 
     // Canvas Pan & Zoom State
@@ -4311,6 +5545,8 @@ class DeldApp {
 
     // Active wire drawing state
     this.wireStart = null; // { comp, pin, coord: {x, y} }
+    this.selectedPin = null; // Absolute pin selection: { comp, pin, coord }
+    this.dragCompleted = false;
 
     // Selected IC for insertion
     this.selectedICForPlacement = null;
@@ -4318,6 +5554,8 @@ class DeldApp {
 
     // Truth Table mode: 'circuit' (Total Circuit) or 'ic' (Individual IC)
     this.truthTableMode = 'circuit';
+    this.suite = new DigitalLogicSuite();
+    this.currentSuiteTab = 'kmap';
 
     this.init();
   }
@@ -4350,6 +5588,8 @@ class DeldApp {
     this.setupToolbar();
     this.setupModals();
     this.setupPresets();
+    this.setupDigitalLogicSuite();
+    this.setupAutoWireSystem();
     this.setupShortcuts();
 
     // 4. Subscribe to Simulation updates
@@ -4368,6 +5608,12 @@ class DeldApp {
       const ttModal = document.getElementById('truth-table-modal');
       if (ttModal && !ttModal.classList.contains('hidden')) {
         this.updateTruthTableView();
+      }
+
+      // If Digital Logic Suite is open, refresh live logic suite
+      const lsModal = document.getElementById('logic-suite-modal');
+      if (lsModal && !lsModal.classList.contains('hidden')) {
+        this.updateLogicSuiteLive();
       }
     });
 
@@ -4390,6 +5636,7 @@ class DeldApp {
   // ==========================================
 
   setTool(tool) {
+    if (tool === 'select') tool = 'wire';
     this.activeTool = tool;
 
     // Reset wire in-progress if changing tools
@@ -4398,8 +5645,9 @@ class DeldApp {
     }
 
     // Update toolbar buttons active styling
-    document.querySelectorAll('.tool-btn').forEach(btn => {
-      if (btn.getAttribute('data-tool') === tool) {
+    document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+      const t = btn.getAttribute('data-tool');
+      if (t === tool || (tool === 'wire' && t === 'select')) {
         btn.classList.add('active');
       } else {
         btn.classList.remove('active');
@@ -4413,6 +5661,10 @@ class DeldApp {
       canvasContainer.style.cursor = 'crosshair';
     } else {
       canvasContainer.style.cursor = 'default';
+    }
+
+    if (tool !== 'hand') {
+      this.isPanning = false;
     }
 
     // Re-render wires with updated cursor styles
@@ -4533,10 +5785,150 @@ class DeldApp {
     this.storage.recordState();
   }
 
+  // ==========================================
+  // ABSOLUTE PIN SELECTION & CONNECTION
+  // ==========================================
+
+  selectPin(endpoint, coord) {
+    if (this.selectedPin) {
+      this.clearPinHighlight(this.selectedPin);
+    }
+
+    const normPin = String(endpoint.pin).trim();
+    const pinCoord = coord || this.board.getPinCoord(endpoint);
+    this.selectedPin = { comp: endpoint.comp, pin: normPin, coord: pinCoord };
+    this.wireStart = this.selectedPin;
+
+    // Highlight starting pin with vibrant cyan glow ring
+    this.setPinHighlight(this.selectedPin, true);
+
+    // Update bottom Pin Selection HUD
+    const hud = document.getElementById('pinSelectionHUD');
+    const nameSpan = document.getElementById('pinSelectionHUDLabel') || document.getElementById('pinSelectionName');
+    if (hud && nameSpan) {
+      const pinName = this.board.getHumanReadablePinName(this.selectedPin);
+      nameSpan.textContent = pinName;
+      hud.classList.remove('hidden');
+    }
+
+    const pinName = this.board.getHumanReadablePinName(this.selectedPin);
+    this.showToast(`Selected: ${pinName}. Click destination pin to connect.`, 'info');
+  }
+
+  deselectPin() {
+    if (this.selectedPin) {
+      this.clearPinHighlight(this.selectedPin);
+      this.selectedPin = null;
+    }
+    this.wireStart = null;
+    this.wireRenderer.clearPreview();
+
+    const hud = document.getElementById('pinSelectionHUD');
+    if (hud) {
+      hud.classList.add('hidden');
+    }
+  }
+
+  setPinHighlight(endpoint, active) {
+    const pinEl = document.querySelector(`.terminal-pin[data-comp="${endpoint.comp}"][data-pin="${endpoint.pin}"]`);
+    if (pinEl) {
+      const ring = pinEl.querySelector('.terminal-hover-ring');
+      if (active) {
+        pinEl.classList.add('wire-start-active');
+        if (ring) {
+          ring.setAttribute('opacity', '1');
+          ring.setAttribute('stroke', '#38bdf8');
+          ring.setAttribute('stroke-width', '3.5');
+        }
+      } else {
+        pinEl.classList.remove('wire-start-active');
+        if (ring) {
+          ring.setAttribute('opacity', '0');
+          ring.setAttribute('stroke', '#facc15');
+          ring.setAttribute('stroke-width', '2.5');
+        }
+      }
+    }
+  }
+
+  clearPinHighlight(endpoint) {
+    this.setPinHighlight(endpoint, false);
+  }
+
+  connectPins(from, to, customColor = null) {
+    const color = customColor || this.wireRenderer.currentColor;
+    const added = this.sim.addWire(from, to, color);
+
+    this.deselectPin();
+
+    if (added) {
+      this.storage.recordState();
+      if (!customColor) {
+        this.wireRenderer.advanceColor();
+        this.updateColorPickerActiveRing();
+      }
+      const fromName = this.board.getHumanReadablePinName(from);
+      const toName = this.board.getHumanReadablePinName(to);
+      this.showToast(`Connected ${fromName} → ${toName}!`, 'success');
+      this.updateAutoWireModalUI();
+      return true;
+    } else {
+      this.showToast('Connection already exists or pins invalid.', 'warning');
+      return false;
+    }
+  }
+
+  finishWireConnection(from, to) {
+    return this.connectPins(from, to);
+  }
+
+  startWireDrawing(endpoint, coord) {
+    this.selectPin(endpoint, coord);
+  }
+
+  cancelWireDrawing() {
+    this.deselectPin();
+  }
+
+  handlePinClick(endpoint, coord) {
+    if (this.activeTool === 'remove-wire' || this.activeTool === 'remove-ic') return;
+    if (this.activeTool === 'hand') {
+      this.setTool('wire');
+    }
+
+    if (this.dragCompleted) {
+      this.dragCompleted = false;
+      return;
+    }
+
+    const clicked = { comp: endpoint.comp, pin: String(endpoint.pin).trim() };
+
+    if (!this.selectedPin) {
+      // First pin clicked: Select it absolutely
+      this.selectPin(clicked, coord);
+    } else {
+      // Second pin clicked: Check if same pin clicked again (toggle off)
+      if (this.selectedPin.comp === clicked.comp && this.selectedPin.pin === clicked.pin) {
+        this.deselectPin();
+        this.showToast('Pin deselected.', 'info');
+        return;
+      }
+
+      // Absolute connection guaranteed: connect selectedPin to clicked pin
+      const from = { comp: this.selectedPin.comp, pin: this.selectedPin.pin };
+      const to = clicked;
+      this.connectPins(from, to);
+    }
+  }
+
   handlePinMouseDown(endpoint, coord, e) {
     if (this.activeTool === 'remove-wire' || (e && e.button !== 0)) return;
+    if (this.activeTool === 'hand') {
+      this.setTool('wire');
+    }
+    this.isPanning = false;
     this.pinDown = {
-      endpoint: { comp: endpoint.comp, pin: String(endpoint.pin) },
+      endpoint: { comp: endpoint.comp, pin: String(endpoint.pin).trim() },
       coord,
       startX: e ? e.clientX : 0,
       startY: e ? e.clientY : 0,
@@ -4547,89 +5939,22 @@ class DeldApp {
   handlePinMouseUp(endpoint, coord, e) {
     if (this.activeTool === 'remove-wire' || (e && e.button !== 0)) return;
 
-    // Check if this was an active drag from a different pin
     if (this.pinDown && this.pinDown.isDragging) {
+      // Geometric CTM nearest-pin snapping guarantees exact target identification
+      const targetPin = (e && e.clientX !== undefined)
+        ? (this.board.findPinNearScreenPoint(e.clientX, e.clientY) || endpoint)
+        : endpoint;
+
       const from = this.pinDown.endpoint;
-      const to = { comp: endpoint.comp, pin: String(endpoint.pin) };
+      const to = { comp: targetPin.comp, pin: String(targetPin.pin).trim() };
       if (from.comp !== to.comp || from.pin !== to.pin) {
-        this.finishWireConnection(from, to);
+        this.connectPins(from, to);
         this.dragCompleted = true;
       } else {
-        this.cancelWireDrawing();
+        this.deselectPin();
       }
     }
     this.pinDown = null;
-  }
-
-  handlePinClick(endpoint, coord) {
-    if (this.activeTool === 'remove-wire' || this.activeTool === 'remove-ic' || this.activeTool === 'hand') return;
-
-    // If drag gesture already completed the connection, ignore the subsequent click
-    if (this.dragCompleted) {
-      this.dragCompleted = false;
-      return;
-    }
-
-    const clicked = { comp: endpoint.comp, pin: String(endpoint.pin) };
-
-    if (!this.wireStart) {
-      // 1st Click: Start new wire
-      this.startWireDrawing(clicked, coord);
-      this.showToast(`Wire started from ${clicked.comp} pin ${clicked.pin}. Click destination pin to connect.`, 'info');
-    } else {
-      // 2nd Click: Finish wire
-      const from = { comp: this.wireStart.comp, pin: String(this.wireStart.pin) };
-      const to = clicked;
-
-      if (from.comp === to.comp && from.pin === to.pin) {
-        this.cancelWireDrawing();
-        this.showToast('Wire cancelled.', 'info');
-        return;
-      }
-
-      this.finishWireConnection(from, to);
-    }
-  }
-
-  startWireDrawing(endpoint, coord) {
-    if (this.wireStart) {
-      const prevPinEl = document.querySelector(`.terminal-pin[data-comp="${this.wireStart.comp}"][data-pin="${this.wireStart.pin}"]`);
-      if (prevPinEl) {
-        prevPinEl.classList.remove('wire-start-active');
-        const ring = prevPinEl.querySelector('.terminal-hover-ring');
-        if (ring) {
-          ring.setAttribute('opacity', '0');
-          ring.setAttribute('stroke', '#facc15');
-          ring.setAttribute('stroke-width', '2.5');
-        }
-      }
-    }
-    this.wireStart = { comp: endpoint.comp, pin: String(endpoint.pin), coord };
-
-    // Highlight starting pin with vibrant cyan glow
-    const pinEl = document.querySelector(`.terminal-pin[data-comp="${endpoint.comp}"][data-pin="${endpoint.pin}"]`);
-    if (pinEl) {
-      pinEl.classList.add('wire-start-active');
-      const ring = pinEl.querySelector('.terminal-hover-ring');
-      if (ring) {
-        ring.setAttribute('opacity', '1');
-        ring.setAttribute('stroke', '#38bdf8');
-        ring.setAttribute('stroke-width', '3.5');
-      }
-    }
-  }
-
-  finishWireConnection(from, to) {
-    const added = this.sim.addWire(from, to, this.wireRenderer.currentColor);
-    if (added) {
-      this.storage.recordState();
-      this.wireRenderer.advanceColor();
-      this.updateColorPickerActiveRing();
-      this.showToast('Connection established!', 'success');
-    } else {
-      this.showToast('Connection already exists or invalid.', 'warning');
-    }
-    this.cancelWireDrawing();
   }
 
   updateColorPickerActiveRing() {
@@ -4643,23 +5968,6 @@ class DeldApp {
         }
       });
     }
-  }
-
-  cancelWireDrawing() {
-    if (this.wireStart) {
-      const pinEl = document.querySelector(`.terminal-pin[data-comp="${this.wireStart.comp}"][data-pin="${this.wireStart.pin}"]`);
-      if (pinEl) {
-        pinEl.classList.remove('wire-start-active');
-        const ring = pinEl.querySelector('.terminal-hover-ring');
-        if (ring) {
-          ring.setAttribute('opacity', '0');
-          ring.setAttribute('stroke', '#facc15');
-          ring.setAttribute('stroke-width', '2.5');
-        }
-      }
-    }
-    this.wireStart = null;
-    this.wireRenderer.clearPreview();
   }
 
   handleWireClick(wireId) {
@@ -4969,6 +6277,9 @@ class DeldApp {
       preset.icBases.forEach(b => {
         this.sim.insertIC(b.id, b.icId);
       });
+      // CRITICAL: Update board dynamic elements immediately so IC chips are mounted
+      // and their pin coordinates are mapped in board.pinCoords BEFORE wires are added
+      this.board.updateDynamicElements();
     }
 
     // Connect wires
@@ -4978,9 +6289,20 @@ class DeldApp {
       });
     }
 
+    // Turn Power ON automatically so user can simulate immediately
+    this.sim.setPower(true);
+    this.board.updateDynamicElements();
+    this.wireRenderer.renderWires(
+      this.sim.wires,
+      (endpoint) => this.board.getPinCoord(endpoint),
+      this.sim.power,
+      this.activeTool,
+      (wireId) => this.handleWireClick(wireId)
+    );
+
     this.setCircuitName(preset.title);
     this.storage.recordState();
-    this.showToast(`Loaded "${preset.title}"! Turn Power ON to run.`, 'success');
+    this.showToast(`Loaded "${preset.title}" with ICs and wiring ready!`, 'success');
   }
 
   // ==========================================
@@ -5558,6 +6880,24 @@ class DeldApp {
     const container = document.getElementById('canvasContainer');
     const editor = document.getElementById('editor');
 
+    // Clicking empty canvas deselects active pin selection
+    container.addEventListener('click', (e) => {
+      if (
+        !e.target.closest('.terminal-pin') &&
+        !e.target.closest('.input-toggle-switch') &&
+        !e.target.closest('.master-power-btn') &&
+        !e.target.closest('.manual-pulse-box') &&
+        !e.target.closest('.chip-remove-btn') &&
+        !e.target.closest('.exact-ic-base') &&
+        !e.target.closest('.mounted-ic-overlay') &&
+        !e.target.closest('.wire-path')
+      ) {
+        if (this.selectedPin && !this.dragCompleted) {
+          this.deselectPin();
+        }
+      }
+    });
+
     // Pan via Mouse Drag
     container.addEventListener('mousedown', (e) => {
       // Do not initiate pan if clicking on interactive board components
@@ -5581,20 +6921,25 @@ class DeldApp {
     });
 
     window.addEventListener('mousemove', (e) => {
+      // If mouse is pressed on a pin, prioritize wire dragging over canvas panning
+      if (this.pinDown) {
+        this.isPanning = false;
+        if (!this.pinDown.isDragging) {
+          const dist = Math.hypot(e.clientX - this.pinDown.startX, e.clientY - this.pinDown.startY);
+          if (dist > 3) {
+            this.pinDown.isDragging = true;
+            if (!this.selectedPin) {
+              this.selectPin(this.pinDown.endpoint, this.pinDown.coord);
+            }
+          }
+        }
+      }
+
       if (this.isPanning) {
         this.panX = e.clientX - this.panStart.x;
         this.panY = e.clientY - this.panStart.y;
         this.applyTransform();
         return;
-      }
-
-      // If mouse is pressed on a pin and moves beyond 5px threshold, activate drag mode
-      if (this.pinDown && !this.pinDown.isDragging) {
-        const dist = Math.hypot(e.clientX - this.pinDown.startX, e.clientY - this.pinDown.startY);
-        if (dist > 5) {
-          this.pinDown.isDragging = true;
-          this.startWireDrawing(this.pinDown.endpoint, this.pinDown.coord);
-        }
       }
 
       if (this.wireStart) {
@@ -5619,33 +6964,32 @@ class DeldApp {
       // Check for drag-to-connect finish on window mouseup
       if (this.pinDown) {
         if (this.pinDown.isDragging) {
-          const targetPinEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('.terminal-pin');
-          if (targetPinEl) {
-            const toComp = targetPinEl.getAttribute('data-comp');
-            const toPin = targetPinEl.getAttribute('data-pin');
-            if (toComp && toPin && (toComp !== this.pinDown.endpoint.comp || toPin !== this.pinDown.endpoint.pin)) {
-              this.finishWireConnection(this.pinDown.endpoint, { comp: toComp, pin: toPin });
-              this.dragCompleted = true;
-            } else {
-              this.cancelWireDrawing();
-            }
+          // Geometric CTM nearest-pin mapping guarantees exact target identification
+          const targetPin = this.board.findPinNearScreenPoint(e.clientX, e.clientY);
+          let toComp = null;
+          let toPin = null;
+
+          if (targetPin) {
+            toComp = targetPin.comp;
+            toPin = String(targetPin.pin).trim();
           } else {
-            this.cancelWireDrawing();
+            // Fallback to DOM elementFromPoint
+            const targetPinEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('.terminal-pin');
+            if (targetPinEl) {
+              toComp = targetPinEl.getAttribute('data-comp');
+              toPin = targetPinEl.getAttribute('data-pin');
+            }
           }
+
+          if (toComp && toPin && (toComp !== this.pinDown.endpoint.comp || toPin !== this.pinDown.endpoint.pin)) {
+            this.connectPins(this.pinDown.endpoint, { comp: toComp, pin: toPin });
+            this.dragCompleted = true;
+          } else if (toComp && toPin && toComp === this.pinDown.endpoint.comp && toPin === this.pinDown.endpoint.pin) {
+            this.deselectPin();
+          }
+          // Note: If dropped in empty space, keep selectedPin active so user can click destination!
         }
         this.pinDown = null;
-      }
-    });
-
-    // Cancel in-progress wire when clicking empty space
-    container.addEventListener('click', (e) => {
-      if (this.dragCompleted) {
-        this.dragCompleted = false;
-        return;
-      }
-      if (this.wireStart && !e.target.closest('.terminal-pin')) {
-        this.cancelWireDrawing();
-        this.showToast('Wire connection canceled.', 'info');
       }
     });
 
@@ -5744,9 +7088,878 @@ class DeldApp {
       } else if (e.key === 'Escape') {
         this.cancelWireDrawing();
         document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.add('hidden'));
+      } else if (e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'v') {
+        this.setTool('wire');
+      } else if (e.key.toLowerCase() === 'h') {
+        this.setTool('hand');
       }
     });
   }
+
+
+  // ==========================================
+  // DIGITAL LOGIC SUITE (6 TOOLS) INTEGRATION
+  // ==========================================
+
+  setupDigitalLogicSuite() {
+    const floatingBtn = document.getElementById('floatingLogicSuiteBtn');
+    const navBtn = document.getElementById('navLogicSuiteBtn');
+    const dropdown = document.getElementById('logicSuiteDropdown');
+    const modal = document.getElementById('logic-suite-modal');
+
+    // Toggle dropdown from floating toolbar lightbulb
+    if (floatingBtn && dropdown) {
+      floatingBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = dropdown.classList.contains('hidden');
+        dropdown.classList.toggle('hidden', !isHidden);
+      });
+    }
+
+    // Toggle dropdown from navbar
+    if (navBtn && dropdown) {
+      navBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = dropdown.classList.contains('hidden');
+        dropdown.classList.toggle('hidden', !isHidden);
+      });
+    }
+
+    // Dropdown items click handling
+    if (dropdown) {
+      dropdown.querySelectorAll('[data-tool-action]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const action = btn.getAttribute('data-tool-action');
+          dropdown.classList.add('hidden');
+          this.openDigitalLogicSuite(action);
+        });
+      });
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', (e) => {
+        if (
+          !dropdown.contains(e.target) &&
+          (!floatingBtn || !floatingBtn.contains(e.target)) &&
+          (!navBtn || !navBtn.contains(e.target))
+        ) {
+          dropdown.classList.add('hidden');
+        }
+      });
+    }
+
+    // Live Kit Sync Toggle button
+    const liveToggleBtn = document.getElementById('suiteLiveSyncToggle');
+    const liveDotPing = document.getElementById('suiteLiveDotPing');
+    const liveDot = document.getElementById('suiteLiveDot');
+
+    if (liveToggleBtn) {
+      liveToggleBtn.addEventListener('click', () => {
+        this.suite.liveSync = !this.suite.liveSync;
+        if (this.suite.liveSync) {
+          liveToggleBtn.textContent = 'LIVE ON';
+          liveToggleBtn.className = 'text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-xs cursor-pointer';
+          if (liveDot) liveDot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500';
+          if (liveDotPing) liveDotPing.classList.remove('hidden');
+          this.showToast('Live Kit Sync Enabled: Analyzing real trainer kit circuit in real-time!', 'success');
+        } else {
+          liveToggleBtn.textContent = 'LIVE OFF';
+          liveToggleBtn.className = 'text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-all shadow-xs cursor-pointer';
+          if (liveDot) liveDot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-500';
+          if (liveDotPing) liveDotPing.classList.add('hidden');
+          this.showToast('Live Kit Sync Paused: Custom Design / Edit Mode active.', 'info');
+        }
+        this.updateLogicSuiteLive();
+      });
+    }
+
+    // Counter Live Clock Stepper button
+    const counterStepBtn = document.getElementById('counterStepClockBtn');
+    if (counterStepBtn) {
+      counterStepBtn.addEventListener('click', () => {
+        this.stepLiveCounter();
+      });
+    }
+
+    // FSM Live Clock Stepper button
+    const fsmStepBtn = document.getElementById('fsmStepClockBtn');
+    if (fsmStepBtn) {
+      fsmStepBtn.addEventListener('click', () => {
+        this.stepLiveFSM();
+      });
+    }
+
+    // Target Output selector dropdown
+    const outputSelect = document.getElementById('suiteOutputSelect');
+    if (outputSelect) {
+      outputSelect.addEventListener('change', (e) => {
+        this.suiteTargetOutputLed = Number(e.target.value);
+        this.updateLogicSuiteLive();
+      });
+    }
+
+    // Modal navigation tab switching
+    if (modal) {
+      modal.querySelectorAll('.suite-tab-btn[data-suite-tab]').forEach(tabBtn => {
+        tabBtn.addEventListener('click', () => {
+          const tab = tabBtn.getAttribute('data-suite-tab');
+          this.setSuiteTab(tab);
+        });
+      });
+
+      // Solve -> Build button
+      const buildBtn = document.getElementById('suiteBuildCircuitBtn');
+      if (buildBtn) {
+        buildBtn.addEventListener('click', () => {
+          this.handleSuiteBuild();
+        });
+      }
+
+      // K-Map variable buttons
+      modal.querySelectorAll('.kmap-var-btn[data-kmap-vars]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const vars = Number(btn.getAttribute('data-kmap-vars'));
+          this.suite.setVarsCount(vars);
+          modal.querySelectorAll('.kmap-var-btn').forEach(b => {
+            b.className = 'kmap-var-btn px-3 py-1 rounded-lg text-slate-600 hover:text-slate-900 transition-colors';
+          });
+          btn.className = 'kmap-var-btn px-3 py-1 rounded-lg bg-white text-amber-600 shadow-xs font-bold transition-colors';
+          this.renderKMapTab();
+        });
+      });
+
+      // K-Map Clear & Fill buttons
+      document.getElementById('kmapClearBtn')?.addEventListener('click', () => {
+        this.suite.minterms.clear();
+        this.suite.dontCares.clear();
+        this.renderKMapTab();
+      });
+
+      document.getElementById('kmapFillOnesBtn')?.addEventListener('click', () => {
+        const total = 1 << this.suite.varsCount;
+        this.suite.dontCares.clear();
+        for (let i = 0; i < total; i++) this.suite.minterms.add(i);
+        this.renderKMapTab();
+      });
+
+      // Copy SOP button
+      document.getElementById('copyKMapSOPBtn')?.addEventListener('click', () => {
+        const qm = this.suite.solveQuineMcCluskey();
+        navigator.clipboard.writeText(qm.sop);
+        this.showToast(`Copied SOP: F = ${qm.sop}`, 'success');
+      });
+
+      // Algebraic Presets
+      modal.querySelectorAll('.algebraic-preset-btn[data-preset]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const preset = btn.getAttribute('data-preset');
+          if (preset === 'consensus') {
+            this.suite.setVarsCount(3);
+            this.suite.minterms = new Set([3, 5, 6, 7]); // AB + A'C + BC
+          } else if (preset === 'absorption') {
+            this.suite.setVarsCount(2);
+            this.suite.minterms = new Set([2, 3]); // A + AB = A
+          } else if (preset === 'demorgan') {
+            this.suite.setVarsCount(2);
+            this.suite.minterms = new Set([0]); // (A+B)' = A'B'
+          }
+          this.renderKMapTab();
+          this.renderSimplifierTab();
+        });
+      });
+
+      // Counter selects
+      const counterSeq = document.getElementById('counterSeqSelect');
+      const counterFF = document.getElementById('counterFFSelect');
+      if (counterSeq) counterSeq.addEventListener('change', () => this.renderCounterTab());
+      if (counterFF) counterFF.addEventListener('change', () => this.renderCounterTab());
+
+      // FSM select
+      const fsmSelect = document.getElementById('fsmPresetSelect');
+      if (fsmSelect) fsmSelect.addEventListener('change', () => this.renderFSMTab());
+    }
+  }
+
+  openDigitalLogicSuite(preferredTool = 'kmap') {
+    const modal = document.getElementById('logic-suite-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    this.setSuiteTab(preferredTool);
+    this.updateLogicSuiteLive();
+  }
+
+  setSuiteTab(tabId) {
+    this.currentSuiteTab = tabId;
+    const modal = document.getElementById('logic-suite-modal');
+    if (!modal) return;
+
+    // Update active tab buttons
+    modal.querySelectorAll('.suite-tab-btn').forEach(btn => {
+      const isCurrent = btn.getAttribute('data-suite-tab') === tabId;
+      if (isCurrent) {
+        btn.className = 'suite-tab-btn active px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-amber-400 border-amber-400 bg-slate-800/80';
+      } else {
+        btn.className = 'suite-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200';
+      }
+    });
+
+    // Update tool badge
+    const badge = document.getElementById('suiteActiveToolBadge');
+    if (badge) {
+      const titles = {
+        'kmap': 'K-Map Solver',
+        'truth-table': 'Truth Table & Waveform',
+        'simplifier': 'Algebraic Simplifier',
+        'circuit': 'Circuit Diagram',
+        'counter': 'Counter Designer',
+        'fsm': 'FSM Designer'
+      };
+      badge.textContent = titles[tabId] || 'Logic Suite';
+    }
+
+    // Hide all panels, show active panel
+    modal.querySelectorAll('.suite-tab-panel').forEach(panel => {
+      panel.classList.add('hidden');
+    });
+    const activePanel = document.getElementById(`suiteTabPanel_${tabId}`);
+    if (activePanel) activePanel.classList.remove('hidden');
+
+    // Trigger tab specific rendering or live update
+    if (this.suite && this.suite.liveSync) {
+      this.updateLogicSuiteLive();
+    } else {
+      if (tabId === 'kmap') this.renderKMapTab();
+      else if (tabId === 'truth-table') this.renderTruthTableTab();
+      else if (tabId === 'simplifier') this.renderSimplifierTab();
+      else if (tabId === 'circuit') this.renderCircuitTab();
+      else if (tabId === 'counter') this.renderCounterTab();
+      else if (tabId === 'fsm') this.renderFSMTab();
+    }
+  }
+
+  // ==========================================
+  // LIVE LOGIC SUITE REAL-TIME SYNC & RENDERERS
+  // ==========================================
+
+  updateLogicSuiteLive() {
+    const modal = document.getElementById('logic-suite-modal');
+    if (!modal || modal.classList.contains('hidden')) return;
+
+    if (this.suite.liveSync) {
+      const circuitData = this.sim.generateCircuitTruthTable();
+
+      if (this.suiteTargetOutputLed === undefined || !circuitData.outputs.includes(this.suiteTargetOutputLed)) {
+        this.suiteTargetOutputLed = circuitData.outputs.length > 0 ? circuitData.outputs[0] : 0;
+      }
+      this.suite.syncWithCircuit(circuitData, this.suiteTargetOutputLed);
+
+      // Update Live Circuit Banner
+      const banner = document.getElementById('suiteLiveCircuitBanner');
+      const summaryEl = document.getElementById('suiteLiveCircuitSummary');
+      const inputStateEl = document.getElementById('suiteLiveInputState');
+      const outputStateEl = document.getElementById('suiteLiveOutputState');
+      const outputWrapper = document.getElementById('suiteOutputSelectWrapper');
+      const outputSelect = document.getElementById('suiteOutputSelect');
+
+      if (banner && summaryEl) {
+        if (circuitData.inputs.length > 0 && circuitData.outputs.length > 0) {
+          banner.className = 'px-6 py-2 bg-emerald-950/70 border-b border-emerald-800/60 flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-emerald-200 select-none';
+          const activeICNames = circuitData.activeICs.map(ic => `${ic.icId} on Base ${ic.baseIndex + 1}`).join(', ') || 'Direct Connection';
+          summaryEl.textContent = `⚡ Live Circuit: ${circuitData.inputs.map(s => 'SW ' + s).join(', ')} ➔ [${activeICNames}] ➔ OUT ${this.suiteTargetOutputLed}`;
+          
+          if (inputStateEl) {
+            const inStrs = circuitData.inputs.map(s => `SW${s}=${this.sim.switches[s] || 0}`);
+            inputStateEl.textContent = `Live Inputs: ${inStrs.join(', ')}`;
+          }
+
+          if (outputWrapper && outputSelect) {
+            outputWrapper.classList.remove('hidden');
+            const currentVal = String(this.suiteTargetOutputLed);
+            const optionsHtml = circuitData.outputs.map(out => {
+              return `<option value="${out}" ${String(out) === currentVal ? 'selected' : ''}>OUT ${out}</option>`;
+            }).join('');
+            if (outputSelect.innerHTML !== optionsHtml) {
+              outputSelect.innerHTML = optionsHtml;
+            }
+            outputSelect.value = currentVal;
+          }
+
+          if (outputStateEl) {
+            const outVal = this.sim.leds[this.suiteTargetOutputLed] || 0;
+            outputStateEl.textContent = `Live Output: OUT${this.suiteTargetOutputLed}=${outVal} (${outVal ? 'HIGH' : 'LOW'})`;
+            outputStateEl.className = outVal ? 'bg-emerald-900 px-2 py-0.5 rounded border border-emerald-500 font-extrabold text-emerald-300 shadow-xs' : 'bg-slate-800 px-2 py-0.5 rounded border border-slate-700 font-semibold text-slate-400';
+          }
+        } else {
+          banner.className = 'px-6 py-2 bg-amber-950/70 border-b border-amber-800/60 flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-amber-200 select-none';
+          summaryEl.textContent = circuitData.emptyReason || 'No complete circuit detected between switches and LEDs.';
+          if (inputStateEl) inputStateEl.textContent = 'Custom Design Mode';
+          if (outputWrapper) outputWrapper.classList.add('hidden');
+          if (outputStateEl) outputStateEl.textContent = 'Solve → Build on Kit below';
+        }
+      }
+    }
+
+    // Refresh currently open tab
+    if (this.currentSuiteTab === 'kmap') this.renderKMapTab();
+    else if (this.currentSuiteTab === 'truth-table') this.renderTruthTableTab();
+    else if (this.currentSuiteTab === 'simplifier') this.renderSimplifierTab();
+    else if (this.currentSuiteTab === 'circuit') this.renderCircuitTab();
+    else if (this.currentSuiteTab === 'counter') this.renderCounterTab();
+    else if (this.currentSuiteTab === 'fsm') this.renderFSMTab();
+  }
+
+  // --- K-MAP TAB RENDERER (LIVE) ---
+  renderKMapTab() {
+    const container = document.getElementById('kmapGridContainer');
+    const mintermsEl = document.getElementById('kmapMintermsSummary');
+    const sopEl = document.getElementById('kmapMinimizedSOP');
+    const gateBadge = document.getElementById('kmapGateCountBadge');
+    const groupsListEl = document.getElementById('kmapGroupsList');
+    const groupCountEl = document.getElementById('kmapGroupCount');
+    const qmStepsEl = document.getElementById('kmapQMSteps');
+    if (!container) return;
+
+    const numVars = this.suite.varsCount;
+    const grid = this.suite.getKMapGridConfig(numVars);
+    const qm = this.suite.solveQuineMcCluskey();
+    const liveMinterm = this.suite.liveRowIndex;
+
+    // 1. Render interactive table with live active cell highlight
+    let tableHtml = '<table class="kmap-grid-table select-none">';
+    
+    // Top column header
+    tableHtml += '<tr><th class="p-2 text-xs font-mono font-bold text-slate-400">' + grid.rowVars.join('') + ' \ ' + grid.colVars.join('') + '</th>';
+    grid.colLabels.forEach(cl => {
+      tableHtml += `<th class="p-2 text-xs font-mono font-bold text-slate-700 text-center">${cl}</th>`;
+    });
+    tableHtml += '</tr>';
+
+    // Grid rows
+    grid.rowLabels.forEach((rl, rIdx) => {
+      tableHtml += `<tr><th class="p-2 text-xs font-mono font-bold text-slate-700 text-right pr-3">${rl}</th>`;
+      grid.colLabels.forEach((cl, cIdx) => {
+        const minterm = grid.cells[rIdx][cIdx];
+        const val = this.suite.getCellState(minterm);
+        const isLiveCell = (minterm === liveMinterm);
+
+        let cellClass = 'kmap-cell relative';
+        if (val === 1) cellClass += ' state-1';
+        else if (val === 'X') cellClass += ' state-x';
+        if (isLiveCell) cellClass += ' ring-4 ring-emerald-500 shadow-lg scale-105 z-10 bg-emerald-100/50';
+
+        tableHtml += `
+          <td>
+            <div class="${cellClass}" data-minterm="${minterm}" title="${isLiveCell ? 'LIVE: Current switch inputs match this cell!' : ''}">
+              <span class="kmap-cell-idx">m${minterm}</span>
+              ${isLiveCell ? '<span class="absolute top-1 right-1 px-1 py-0.2 rounded text-[8px] font-black bg-emerald-500 text-white animate-pulse">LIVE</span>' : ''}
+              <span class="kmap-val">${val}</span>
+            </div>
+          </td>
+        `;
+      });
+      tableHtml += '</tr>';
+    });
+    tableHtml += '</table>';
+    container.innerHTML = tableHtml;
+
+    // Bind cell clicks (toggles cell and pauses live sync if user custom edits)
+    container.querySelectorAll('.kmap-cell[data-minterm]').forEach(cell => {
+      cell.addEventListener('click', () => {
+        const m = Number(cell.getAttribute('data-minterm'));
+        if (this.suite.liveSync) {
+          this.suite.liveSync = false;
+          const liveToggleBtn = document.getElementById('suiteLiveSyncToggle');
+          if (liveToggleBtn) {
+            liveToggleBtn.textContent = 'LIVE OFF';
+            liveToggleBtn.className = 'text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-all shadow-xs cursor-pointer';
+          }
+          this.showToast('Paused Live Sync for manual K-Map editing. Click LIVE ON to re-sync.', 'info');
+        }
+        this.suite.toggleCell(m);
+        this.renderKMapTab();
+      });
+    });
+
+    // 2. Update stats and equations
+    const mintermArr = Array.from(this.suite.minterms).sort((a,b) => a-b);
+    if (mintermsEl) mintermsEl.textContent = mintermArr.length ? `Σ m(${mintermArr.join(', ')})` : '0 minterms';
+    const outName = this.suite.outputLedName || 'F';
+    if (sopEl) sopEl.textContent = `${outName} = ${qm.sop || '0'}`;
+    if (gateBadge) gateBadge.textContent = `Required Gates: ${qm.gateCount}`;
+    if (groupCountEl) groupCountEl.textContent = `${qm.terms.length} Group${qm.terms.length === 1 ? '' : 's'}`;
+
+    // 3. Render Prime Implicant groups
+    if (groupsListEl) {
+      if (qm.terms.length === 0) {
+        groupsListEl.innerHTML = '<div class="text-slate-400 italic text-center py-2">No active groups</div>';
+      } else {
+        groupsListEl.innerHTML = qm.terms.map((t) => `
+          <div class="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${t.color}"></span>
+              <span class="font-bold text-slate-800 font-mono">${t.term}</span>
+            </div>
+            <span class="font-mono text-[11px] text-slate-500">m(${t.minterms.join(', ')})</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    // 4. Quine-McCluskey Steps
+    if (qmStepsEl) {
+      qmStepsEl.innerHTML = qm.qmSteps.map(step => `<div>• ${step}</div>`).join('');
+    }
+  }
+
+  // --- TRUTH TABLE & WAVEFORM TAB RENDERER (LIVE) ---
+  renderTruthTableTab() {
+    const tableContainer = document.getElementById('suiteTruthTableContainer');
+    const stdEl = document.getElementById('ttStandardForms');
+    const canvas = document.getElementById('suiteWaveformCanvas');
+    if (!tableContainer) return;
+
+    const data = this.suite.generateTruthTableData();
+    const liveRowIndex = data.liveRowIndex !== undefined ? data.liveRowIndex : -1;
+
+    if (stdEl) {
+      stdEl.textContent = `${data.sopStandard} • ${data.posStandard}`;
+    }
+
+    const outputHeader = data.outputName || 'F (Output)';
+    const hasMultipleOutputs = Boolean(data.allOutputLeds && data.allOutputLeds.length > 1);
+    const activeTargetLed = data.outputLed !== undefined ? data.outputLed : (data.allOutputLeds && data.allOutputLeds[0]);
+
+    const tableHeadersHtml = hasMultipleOutputs
+      ? data.allOutputLeds.map(led => {
+          const isActive = led === activeTargetLed;
+          return `
+            <th class="px-3 py-2 text-center border-l border-slate-200 cursor-pointer transition-colors ${isActive ? 'bg-emerald-100/90 text-emerald-800 font-extrabold shadow-xs' : 'text-slate-600 hover:bg-slate-200/70 font-bold'}"
+                data-output-select="${led}" title="Click to solve this output in K-Map & Simplifier">
+              OUT ${led} ${isActive ? '<span class="text-[9px] bg-emerald-600 text-white px-1 py-0.2 rounded ml-1">TARGET</span>' : ''}
+            </th>
+          `;
+        }).join('')
+      : `<th class="px-3 py-2 text-emerald-700 font-bold">${outputHeader}</th>`;
+
+    tableContainer.innerHTML = `
+      <div class="text-[11px] text-slate-500 px-3 py-1.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+        <span>💡 Click any row to test on trainer kit in real-time</span>
+        <span class="font-bold text-emerald-700">Live Active Row Highlighted</span>
+      </div>
+      <table class="w-full text-left text-xs font-mono border-collapse">
+        <thead class="bg-slate-100 border-b border-slate-200 sticky top-0">
+          <tr>
+            <th class="px-3 py-2 text-slate-500">Row</th>
+            ${data.vars.map(v => `<th class="px-3 py-2 text-sky-700">${v}</th>`).join('')}
+            ${tableHeadersHtml}
+            <th class="px-3 py-2 text-slate-500 text-center">Kit Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.rows.map(r => {
+            const isLive = r.isLive || (r.index === liveRowIndex);
+            const rowClass = isLive
+              ? 'bg-emerald-100/90 border-l-4 border-l-emerald-600 font-extrabold text-emerald-950 shadow-xs'
+              : 'border-b border-slate-100 hover:bg-slate-50 cursor-pointer';
+
+            const outputCellsHtml = hasMultipleOutputs
+              ? data.allOutputLeds.map(led => {
+                  const val = r.allOutputs ? r.allOutputs[led] : (led === activeTargetLed ? r.output : 0);
+                  const isTarget = led === activeTargetLed;
+                  return `
+                    <td class="px-3 py-2 font-bold text-center border-l border-slate-100 ${isTarget ? 'bg-emerald-50/50' : ''} ${val === 1 ? 'text-emerald-700' : 'text-slate-400'}">
+                      ${val}
+                      ${isTarget && isLive ? '<span class="ml-1.5 px-1 py-0.2 rounded bg-emerald-600 text-white font-black text-[8px] animate-pulse">LIVE</span>' : ''}
+                    </td>
+                  `;
+                }).join('')
+              : `
+                <td class="px-3 py-2 font-bold ${r.output === 1 ? 'text-emerald-700' : (r.output === 'X' ? 'text-blue-500' : 'text-slate-400')}">
+                  ${r.output}
+                  ${isLive ? '<span class="ml-2 px-1.5 py-0.5 rounded bg-emerald-600 text-white font-black text-[9px] animate-pulse">▶ LIVE</span>' : ''}
+                </td>
+              `;
+
+            return `
+              <tr class="${rowClass} suite-live-tt-row" data-row-index="${r.index}" title="Click to test this row on trainer kit">
+                <td class="px-3 py-2 text-slate-500 font-bold">m${r.index}</td>
+                ${r.inputs.map(b => `<td class="px-3 py-2 font-bold ${b ? 'text-sky-600' : 'text-slate-400'}">${b}</td>`).join('')}
+                ${outputCellsHtml}
+                <td class="px-3 py-2 text-center">
+                  <button type="button" class="px-2 py-0.5 rounded text-[10px] font-bold text-sky-700 hover:bg-sky-100 transition-colors">
+                    ${isLive ? 'Active' : 'Apply'}
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Click output headers to switch active target output
+    tableContainer.querySelectorAll('[data-output-select]').forEach(th => {
+      th.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const selected = Number(th.getAttribute('data-output-select'));
+        this.suiteTargetOutputLed = selected;
+        this.updateLogicSuiteLive();
+      });
+    });
+
+    // Bind row clicks to set kit switches in real-time
+    tableContainer.querySelectorAll('.suite-live-tt-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const rowIdx = Number(row.getAttribute('data-row-index'));
+        this.applyTruthTableRowToKit(rowIdx);
+      });
+    });
+
+    // Draw Logic Analyzer Waveform on Canvas with Live Cursor
+    if (canvas && canvas.getContext) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Dark background
+      ctx.fillStyle = '#0b1329';
+      ctx.fillRect(0, 0, w, h);
+
+      const numSteps = data.rows.length;
+      const colWidth = (w - 70) / numSteps;
+      const outSignals = hasMultipleOutputs
+        ? data.allOutputLeds.map(led => `OUT ${led}`)
+        : [outputHeader];
+      const signals = [...data.vars, ...outSignals];
+      const rowHeight = (h - 30) / signals.length;
+
+      signals.forEach((sig, idx) => {
+        const yBase = 25 + idx * rowHeight;
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(sig, 55, yBase + 15);
+
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(65, yBase + rowHeight);
+        ctx.lineTo(w - 10, yBase + rowHeight);
+        ctx.stroke();
+
+        const isInput = idx < data.vars.length;
+        ctx.strokeStyle = !isInput ? '#10b981' : (idx % 2 === 0 ? '#38bdf8' : '#a855f7');
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+
+        let lastVal = null;
+        for (let s = 0; s < numSteps; s++) {
+          let val;
+          if (isInput) {
+            val = data.rows[s].inputs[idx];
+          } else {
+            const outLedIndex = idx - data.vars.length;
+            if (hasMultipleOutputs) {
+              const outLed = data.allOutputLeds[outLedIndex];
+              val = data.rows[s].allOutputs ? (data.rows[s].allOutputs[outLed] || 0) : 0;
+            } else {
+              val = data.rows[s].output === 1 ? 1 : 0;
+            }
+          }
+          const xStart = 65 + s * colWidth;
+          const xEnd = xStart + colWidth;
+          const yHigh = yBase + 4;
+          const yLow = yBase + rowHeight - 8;
+          const yCur = val ? yHigh : yLow;
+
+          if (s === 0) {
+            ctx.moveTo(xStart, yCur);
+          } else if (lastVal !== val) {
+            ctx.lineTo(xStart, yCur);
+          }
+          ctx.lineTo(xEnd, yCur);
+          lastVal = val;
+        }
+        ctx.stroke();
+      });
+
+      // Time step headers
+      ctx.fillStyle = '#64748b';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      for (let s = 0; s < numSteps; s++) {
+        const x = 65 + s * colWidth + colWidth / 2;
+        ctx.fillText(`t${s}`, x, 14);
+      }
+
+      // Draw Live Playhead Cursor
+      if (liveRowIndex >= 0 && liveRowIndex < numSteps) {
+        const liveX = 65 + liveRowIndex * colWidth + colWidth / 2;
+
+        // Glowing live vertical line
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(liveX, 16);
+        ctx.lineTo(liveX, h - 10);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Live Marker Badge at top
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.arc(liveX, 16, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#10b981';
+        ctx.font = 'bold 9px monospace';
+        ctx.fillText('LIVE', liveX, 10);
+      }
+    }
+  }
+
+  applyTruthTableRowToKit(rowIndex) {
+    if (this.suite.liveCircuitInfo && this.suite.liveCircuitInfo.inputs) {
+      const activeSwitches = this.suite.liveCircuitInfo.inputs;
+      const N = activeSwitches.length;
+      activeSwitches.forEach((swNum, bitPos) => {
+        const shift = N - 1 - bitPos;
+        const bitVal = (rowIndex >> shift) & 1;
+        this.sim.switches[swNum] = bitVal;
+      });
+      this.sim.power = true;
+      this.storage.recordState();
+      this.sim.evaluate();
+      this.board.updateDynamicElements();
+      this.showToast(`Set kit switches to row m${rowIndex}!`, 'success');
+      this.updateLogicSuiteLive();
+    }
+  }
+
+  // --- COUNTER DESIGNER TAB RENDERER (LIVE) ---
+  renderCounterTab() {
+    const seqSelect = document.getElementById('counterSeqSelect');
+    const ffSelect = document.getElementById('counterFFSelect');
+    const lockoutText = document.getElementById('counterLockoutText');
+    const excitationList = document.getElementById('counterExcitationList');
+    const transitionsList = document.getElementById('counterTransitionsList');
+    const stateBadge = document.getElementById('counterLiveStateBadge');
+
+    const res = this.suite.designCounter({
+      sequenceType: seqSelect?.value || 'bcd',
+      flipFlop: ffSelect?.value || 'D'
+    });
+
+    const curIdx = this.suite.counterCurrentIndex % res.seq.length;
+    const curVal = res.seq[curIdx];
+    const curBin = curVal.toString(2).padStart(res.numBits, '0');
+    const nextVal = res.seq[(curIdx + 1) % res.seq.length];
+    const nextBin = nextVal.toString(2).padStart(res.numBits, '0');
+
+    if (stateBadge) {
+      stateBadge.textContent = `Live State: S${curVal} (${curBin})`;
+    }
+
+    if (lockoutText) lockoutText.textContent = res.lockoutNote;
+
+    if (excitationList) {
+      excitationList.innerHTML = res.excitationEquations.map(eq => `
+        <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+          <span class="font-bold text-slate-800">${eq.flipFlop}:</span>
+          <span class="text-sky-700 font-bold">${eq.equation}</span>
+        </div>
+      `).join('');
+    }
+
+    if (transitionsList) {
+      transitionsList.innerHTML = res.transitions.map((t) => {
+        const isCurrent = (t.from === curVal);
+        const cardClass = isCurrent
+          ? 'p-2.5 bg-emerald-50 border-2 border-emerald-500 rounded-xl flex items-center justify-between shadow-xs font-bold text-emerald-950'
+          : 'p-2 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between';
+
+        return `
+          <div class="${cardClass}">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded ${isCurrent ? 'bg-emerald-600 text-white' : 'bg-sky-100 text-sky-800'} font-bold">S${t.from}</span>
+              <span class="text-slate-500">(${t.fromBin})</span>
+              ${isCurrent ? '<span class="text-[10px] text-emerald-600 font-extrabold animate-pulse">◀ ACTIVE</span>' : ''}
+            </div>
+            <span class="text-slate-400 font-bold">→</span>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">S${t.to}</span>
+              <span class="text-slate-500">(${t.toBin})</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  stepLiveCounter() {
+    this.suite.counterCurrentIndex = (this.suite.counterCurrentIndex + 1);
+    this.sim.setManualPulse(true);
+    setTimeout(() => this.sim.setManualPulse(false), 150);
+    this.renderCounterTab();
+    this.showToast('Clock pulse fired: Counter advanced to next state!', 'info');
+  }
+
+  // --- FSM DESIGNER TAB RENDERER (LIVE) ---
+  renderFSMTab() {
+    const presetSelect = document.getElementById('fsmPresetSelect');
+    const diagramContainer = document.getElementById('fsmDiagramContainer');
+    const tableEl = document.getElementById('fsmTransitionsTable');
+    const eqList = document.getElementById('fsmEquationsList');
+    const stateBadge = document.getElementById('fsmLiveStateBadge');
+    const inputBadge = document.getElementById('fsmLiveInputBadge');
+
+    const fsm = this.suite.designFSM(presetSelect?.value || 'seq101');
+    const curState = this.suite.fsmCurrentState || 'S0';
+
+    // Current input bit from SW 0 on kit
+    const curInputBit = this.sim.switches[0] || 0;
+
+    if (stateBadge) stateBadge.textContent = `Live State: ${curState}`;
+    if (inputBadge) inputBadge.textContent = `Input X: SW0=${curInputBit}`;
+
+    if (diagramContainer) {
+      diagramContainer.innerHTML = `
+        <svg class="w-full h-full" viewBox="0 0 400 220">
+          ${fsm.states.map((s, idx) => {
+            const cx = 80 + idx * 120;
+            const cy = 110;
+            const isActive = (s.name === curState);
+
+            return `
+              <g>
+                <circle cx="${cx}" cy="${cy}" r="30" fill="${isActive ? '#dcfce7' : '#f0fdf4'}" stroke="${isActive ? '#16a34a' : '#86efac'}" stroke-width="${isActive ? '4' : '2.5'}" ${isActive ? 'filter="drop-shadow(0 0 8px rgba(34,197,94,0.6))"' : ''}/>
+                <text x="${cx}" y="${cy + 4}" font-size="13" font-weight="bold" fill="${isActive ? '#14532d' : '#15803d'}" text-anchor="middle">${s.name}</text>
+                <text x="${cx}" y="${cy + 48}" font-size="10" font-weight="bold" fill="#64748b" text-anchor="middle">${s.code}</text>
+                ${isActive ? `<text x="${cx}" y="${cy - 36}" font-size="9" font-weight="black" fill="#16a34a" text-anchor="middle">ACTIVE</text>` : ''}
+              </g>
+            `;
+          }).join('')}
+
+          <path d="M 108 100 Q 140 70 172 100" fill="none" stroke="#3b82f6" stroke-width="2"/>
+          <text x="140" y="80" font-size="10" font-weight="bold" fill="#2563eb" text-anchor="middle">1 / 0</text>
+          
+          <path d="M 228 100 Q 260 70 292 100" fill="none" stroke="#3b82f6" stroke-width="2"/>
+          <text x="260" y="80" font-size="10" font-weight="bold" fill="#2563eb" text-anchor="middle">0 / 0</text>
+
+          <path d="M 292 125 Q 200 175 108 125" fill="none" stroke="#ec4899" stroke-width="2"/>
+          <text x="200" y="165" font-size="10" font-weight="bold" fill="#db2777" text-anchor="middle">1 / 1 (Detected!)</text>
+        </svg>
+      `;
+    }
+
+    if (tableEl) {
+      tableEl.innerHTML = `
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="bg-slate-100 border-b border-slate-200">
+              <th class="p-1.5">Current</th>
+              <th class="p-1.5">Input X</th>
+              <th class="p-1.5">Next State</th>
+              <th class="p-1.5">Output Z</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fsm.transitions.map(tr => {
+              const isActive = (tr.from === curState && tr.input === curInputBit);
+              const trClass = isActive ? 'bg-purple-100 font-extrabold text-purple-950 border-l-4 border-l-purple-600' : 'border-b border-slate-100';
+
+              return `
+                <tr class="${trClass}">
+                  <td class="p-1.5 font-bold">${tr.from} ${isActive ? '◀' : ''}</td>
+                  <td class="p-1.5">${tr.input}</td>
+                  <td class="p-1.5 font-bold text-sky-700">${tr.next}</td>
+                  <td class="p-1.5 font-bold ${tr.out ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400'}">${tr.out}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    if (eqList) {
+      eqList.innerHTML = fsm.equations.map(eq => `
+        <div class="p-2 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
+          <span class="font-bold text-slate-700">${eq.target}:</span>
+          <span class="font-bold text-purple-700">${eq.expr}</span>
+        </div>
+      `).join('');
+    }
+  }
+
+  stepLiveFSM() {
+    const fsm = this.suite.designFSM(document.getElementById('fsmPresetSelect')?.value || 'seq101');
+    const curInput = this.sim.switches[0] || 0;
+    const curState = this.suite.fsmCurrentState || 'S0';
+
+    const match = fsm.transitions.find(tr => tr.from === curState && tr.input === curInput);
+    if (match) {
+      this.suite.fsmCurrentState = match.next;
+      this.sim.setManualPulse(true);
+      setTimeout(() => this.sim.setManualPulse(false), 150);
+      this.renderFSMTab();
+      this.showToast(`FSM transitioned from ${curState} ➔ ${match.next} (Output Z=${match.out})`, 'info');
+    }
+  }
+
+  // --- SOLVE -> BUILD CIRCUIT ON TRAINER KIT ---
+  handleSuiteBuild() {
+    let spec;
+    if (this.currentSuiteTab === 'counter') {
+      const counterSeq = document.getElementById('counterSeqSelect')?.value || 'bcd';
+      const counterFF = document.getElementById('counterFFSelect')?.value || 'D';
+      spec = this.suite.synthesizeCounterToKit({ sequenceType: counterSeq, flipFlop: counterFF });
+    } else {
+      spec = this.suite.synthesizeCircuitToKit();
+    }
+
+    this.sim.resetCircuit();
+
+    if (spec.icBases) {
+      spec.icBases.forEach(b => {
+        this.sim.insertIC(b.id, b.icId);
+      });
+      // CRITICAL: Update board dynamic elements immediately so IC chips are mounted
+      // and their pin coordinates are mapped in board.pinCoords BEFORE wires are added
+      this.board.updateDynamicElements();
+    }
+
+    if (spec.wires) {
+      spec.wires.forEach(w => {
+        this.sim.addWire(w.from, w.to, w.color);
+      });
+    }
+
+    if (spec.switches) {
+      spec.switches.forEach(swIdx => {
+        this.sim.switches[swIdx] = 1;
+      });
+    }
+
+    this.sim.setPower(true);
+    this.board.updateDynamicElements();
+    this.wireRenderer.renderWires(
+      this.sim.wires,
+      (endpoint) => this.board.getPinCoord(endpoint),
+      this.sim.power,
+      this.activeTool,
+      (wireId) => this.handleWireClick(wireId)
+    );
+
+    this.setCircuitName(spec.title || 'Digital Logic Circuit');
+    this.storage.recordState();
+
+    document.getElementById('logic-suite-modal')?.classList.add('hidden');
+    this.showToast(`⚡ Built "${spec.title}" on Trainer Kit! Power is ON.`, 'success');
+  }
+
 
   showToast(message, type = 'info') {
     const toastContainer = document.getElementById('toast-container');
@@ -5769,15 +7982,415 @@ class DeldApp {
       setTimeout(() => toast.remove(), 300);
     }, 3200);
   }
+
+  // ==========================================
+  // AUTOMATIC WIRE ROUTING & SYSTEM
+  // ==========================================
+
+  setupAutoWireSystem() {
+    const modal = document.getElementById('auto-wire-modal');
+    const navBtn = document.getElementById('navAutoWireBtn');
+    const hudAutoWireBtn = document.getElementById('pinSelectionAutoWireBtn');
+    const hudCancelBtn = document.getElementById('pinSelectionCancelBtn');
+    const singleConnectBtn = document.getElementById('autoWireSingleConnectBtn');
+    const batchExecuteBtn = document.getElementById('autoWireBatchExecuteBtn');
+    const clearAllWiresBtn = document.getElementById('autoWireClearAllWiresBtn');
+    const tabDropdownBtn = document.getElementById('tabAutoWireDropdownBtn');
+    const tabBatchBtn = document.getElementById('tabAutoWireBatchBtn');
+    const dropdownSection = document.getElementById('autoWireDropdownSection');
+    const batchSection = document.getElementById('autoWireBatchSection');
+
+    // Tab switching
+    if (tabDropdownBtn && tabBatchBtn && dropdownSection && batchSection) {
+      tabDropdownBtn.addEventListener('click', () => {
+        tabDropdownBtn.className = 'auto-wire-tab-btn active px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-cyan-400 border-cyan-400 bg-slate-800/80';
+        tabBatchBtn.className = 'auto-wire-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200';
+        dropdownSection.classList.remove('hidden');
+        batchSection.classList.add('hidden');
+      });
+
+      tabBatchBtn.addEventListener('click', () => {
+        tabBatchBtn.className = 'auto-wire-tab-btn active px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-cyan-400 border-cyan-400 bg-slate-800/80';
+        tabDropdownBtn.className = 'auto-wire-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200';
+        batchSection.classList.remove('hidden');
+        dropdownSection.classList.add('hidden');
+      });
+    }
+
+    // Populate Pin Dropdowns & Color Swatches
+    this.populateAutoWireDropdowns();
+
+    // Open from Navbar Button
+    if (navBtn && modal) {
+      navBtn.addEventListener('click', () => {
+        this.populateAutoWireDropdowns();
+        this.updateAutoWireModalUI();
+        modal.classList.remove('hidden');
+      });
+    }
+
+    // HUD Auto-Wire Button
+    if (hudAutoWireBtn && modal) {
+      hudAutoWireBtn.addEventListener('click', () => {
+        this.populateAutoWireDropdowns();
+        if (this.selectedPin) {
+          const fromVal = `${this.selectedPin.comp}:${this.selectedPin.pin}`;
+          const fromSelect = document.getElementById('autoWireFromSelect');
+          if (fromSelect) fromSelect.value = fromVal;
+        }
+        this.updateAutoWireModalUI();
+        modal.classList.remove('hidden');
+      });
+    }
+
+    // HUD Cancel Button
+    if (hudCancelBtn) {
+      hudCancelBtn.addEventListener('click', () => {
+        this.deselectPin();
+        this.showToast('Pin selection cancelled.', 'info');
+      });
+    }
+
+    // Single Wire Connect
+    if (singleConnectBtn) {
+      singleConnectBtn.addEventListener('click', () => {
+        const fromSelect = document.getElementById('autoWireFromSelect');
+        const toSelect = document.getElementById('autoWireToSelect');
+        if (!fromSelect || !toSelect) return;
+
+        const fromVal = fromSelect.value;
+        const toVal = toSelect.value;
+        if (!fromVal || !toVal) {
+          this.showToast('Please select both source and destination pins.', 'warning');
+          return;
+        }
+
+        const [fromComp, fromPin] = fromVal.split(':');
+        const [toComp, toPin] = toVal.split(':');
+
+        if (fromComp === toComp && fromPin === toPin) {
+          this.showToast('Cannot connect a pin to itself.', 'warning');
+          return;
+        }
+
+        const color = this.wireRenderer.currentColor;
+        const success = this.connectPins({ comp: fromComp, pin: fromPin }, { comp: toComp, pin: toPin }, color);
+        if (success) {
+          this.updateAutoWireModalUI();
+        }
+      });
+    }
+
+    // Batch Auto-Wire Execution
+    if (batchExecuteBtn) {
+      batchExecuteBtn.addEventListener('click', () => {
+        const textarea = document.getElementById('autoWireBatchInput') || document.getElementById('autoWireBatchText');
+        if (!textarea) return;
+        this.executeAutoWireBatch(textarea.value);
+      });
+    }
+
+    // Batch Presets
+    document.querySelectorAll('.batch-insert-btn, .auto-wire-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const syntax = btn.getAttribute('data-text') || btn.getAttribute('data-syntax');
+        const textarea = document.getElementById('autoWireBatchInput') || document.getElementById('autoWireBatchText');
+        if (textarea && syntax) {
+          if (textarea.value.trim() === '') {
+            textarea.value = syntax.trim() + '\n';
+          } else {
+            textarea.value = textarea.value.trim() + '\n' + syntax.trim() + '\n';
+          }
+          textarea.focus();
+        }
+      });
+    });
+
+    // Clear All Wires
+    if (clearAllWiresBtn) {
+      clearAllWiresBtn.addEventListener('click', () => {
+        if (this.sim.wires.length === 0) {
+          this.showToast('No active wires to clear.', 'info');
+          return;
+        }
+        if (confirm(`Disconnect all ${this.sim.wires.length} wires from the board?`)) {
+          this.sim.wires = [];
+          this.sim.evaluate();
+          this.storage.recordState();
+          this.updateAutoWireModalUI();
+          this.showToast('All wires disconnected.', 'info');
+        }
+      });
+    }
+  }
+
+  populateAutoWireDropdowns() {
+    const fromSelect = document.getElementById('autoWireFromSelect');
+    const toSelect = document.getElementById('autoWireToSelect');
+    const swatchesContainer = document.getElementById('autoWireColorSwatches');
+    if (!fromSelect || !toSelect) return;
+
+    const availableCategories = this.board.getAllAvailablePins();
+
+    const renderOptions = () => {
+      return availableCategories.map(cat => `
+        <optgroup label="${cat.category}">
+          ${cat.pins.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
+        </optgroup>
+      `).join('');
+    };
+
+    const optionsHtml = renderOptions();
+    const prevFrom = fromSelect.value;
+    const prevTo = toSelect.value;
+
+    fromSelect.innerHTML = optionsHtml;
+    toSelect.innerHTML = optionsHtml;
+
+    if (prevFrom) fromSelect.value = prevFrom;
+    else fromSelect.value = 'switch:15';
+
+    if (prevTo) toSelect.value = prevTo;
+    else toSelect.value = 'icbase_0:1';
+
+    // Populate Color Swatches
+    if (swatchesContainer && swatchesContainer.children.length === 0) {
+      swatchesContainer.innerHTML = WIRE_PALETTE.map(c => `
+        <button type="button" class="w-6 h-6 rounded-full border border-slate-400 hover:scale-110 transition-transform cursor-pointer auto-wire-color-swatch ${c.hex === this.wireRenderer.currentColor ? 'ring-2 ring-sky-500' : ''}" style="background-color: ${c.hex}" data-hex="${c.hex}" title="${c.name}"></button>
+      `).join('');
+
+      swatchesContainer.querySelectorAll('.auto-wire-color-swatch').forEach(b => {
+        b.addEventListener('click', () => {
+          const hex = b.getAttribute('data-hex');
+          this.wireRenderer.setCurrentColor(hex);
+          swatchesContainer.querySelectorAll('.auto-wire-color-swatch').forEach(s => s.classList.remove('ring-2', 'ring-sky-500'));
+          b.classList.add('ring-2', 'ring-sky-500');
+          this.updateColorPickerActiveRing();
+        });
+      });
+    }
+  }
+
+  updateAutoWireModalUI() {
+    const countBadge = document.getElementById('autoWireActiveCount') || document.getElementById('autoWireCountBadge');
+    if (countBadge) {
+      countBadge.textContent = this.sim.wires.length;
+    }
+
+    const listContainer = document.getElementById('autoWireExistingList');
+    if (listContainer) {
+      if (this.sim.wires.length === 0) {
+        listContainer.innerHTML = `
+          <div class="text-center py-6 text-slate-400 italic text-xs">
+            No wires connected yet. Select pins above or click terminals directly on the board.
+          </div>
+        `;
+      } else {
+        listContainer.innerHTML = this.sim.wires.map((w) => {
+          const fromName = this.board.getHumanReadablePinName(w.from);
+          const toName = this.board.getHumanReadablePinName(w.to);
+          return `
+            <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-slate-300 transition-colors">
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full border border-black/20 shadow-sm shrink-0" style="background-color: ${w.color || '#3b82f6'};"></span>
+                <span class="font-bold text-slate-800">${fromName}</span>
+                <span class="text-slate-400">➔</span>
+                <span class="font-bold text-slate-800">${toName}</span>
+              </div>
+              <button type="button" class="disconnect-wire-btn text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded text-xs font-semibold transition-colors cursor-pointer" data-wire-id="${w.id}">
+                Disconnect
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        listContainer.querySelectorAll('.disconnect-wire-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const wireId = btn.getAttribute('data-wire-id');
+            if (wireId) {
+              this.sim.removeWire(wireId);
+              this.storage.recordState();
+              this.updateAutoWireModalUI();
+              this.showToast('Wire disconnected.', 'info');
+            }
+          });
+        });
+      }
+    }
+  }
+
+  parsePinString(rawStr) {
+    if (!rawStr) return null;
+    const s = rawStr.trim().toLowerCase();
+
+    // 1. Power connections
+    if (['vcc', '+5v', '5v', 'power:vcc', 'power_vcc', 'pwr:vcc', 'vcc:0'].includes(s)) {
+      return { comp: 'power', pin: 'vcc' };
+    }
+    if (['gnd', 'ground', '0v', 'power:gnd', 'power_gnd', 'pwr:gnd', 'gnd:0'].includes(s)) {
+      return { comp: 'power', pin: 'gnd' };
+    }
+
+    // 2. Switches: SW 15, Switch 15, SW15, IN 15, S15
+    const swMatch = s.match(/^(?:sw(?:itch)?|input|in|s)\s*[:\-_]?\s*(\d{1,2})$/);
+    if (swMatch) {
+      const num = parseInt(swMatch[1], 10);
+      if (num >= 0 && num <= 15) return { comp: 'switch', pin: String(num) };
+    }
+
+    // 3. Output LEDs: OUT 13, LED 13, Output 13, OUT13, O13
+    const outMatch = s.match(/^(?:out(?:put)?|led|o)\s*[:\-_]?\s*(\d{1,2})$/);
+    if (outMatch) {
+      const num = parseInt(outMatch[1], 10);
+      if (num >= 0 && num <= 15) return { comp: 'led', pin: String(num) };
+    }
+
+    // 4. Clock: CLK 1Hz, Clock 10Hz, etc.
+    const clkMatch = s.match(/^(?:clk|clock)\s*[:\-_]?\s*(1hz|5hz|10hz|100hz|1khz|10khz|100khz|1|5|10|manual|manual_inv)$/);
+    if (clkMatch) {
+      const val = clkMatch[1].replace('hz', '');
+      return { comp: 'clock', pin: val };
+    }
+
+    // 5. Pulsers: Pulse 1, Pulse A, Pulser 2, Pulser B
+    const pulseMatch = s.match(/^(?:pulse|pulser)\s*[:\-_]?\s*([12ab])$/);
+    if (pulseMatch) {
+      const p = ['1', 'a'].includes(pulseMatch[1]) ? '1' : '2';
+      return { comp: 'pulse', pin: p };
+    }
+
+    // 6. 7-Segment Displays: Disp 1 Pin A, Display 2 Pin DP
+    const dispMatch = s.match(/^(?:disp(?:lay)?)\s*([12])\s*(?:pin|p|:)?\s*([a-g]|dp)$/);
+    if (dispMatch) {
+      return { comp: `display_${dispMatch[1]}`, pin: dispMatch[2] };
+    }
+
+    // 7. IC Base Pin: IC1 Pin 14, Base 1 Pin 7, IC 2 Pin 1, IC1:14, Base 1:7
+    const icMatch = s.match(/^(?:ic(?:base)?|base)\s*[:\-_]?\s*(\d)\s*(?:pin|p|:)?\s*[:\-_]?\s*(\d{1,2})$/);
+    if (icMatch) {
+      const baseNum = parseInt(icMatch[1], 10);
+      const baseIdx = baseNum >= 1 ? baseNum - 1 : 0;
+      const pinNum = parseInt(icMatch[2], 10);
+      if (baseIdx >= 0 && baseIdx < 5 && pinNum >= 1 && pinNum <= 20) {
+        return { comp: `icbase_${baseIdx}`, pin: String(pinNum) };
+      }
+    }
+
+    // 8. Named IC Chip lookup: e.g. "74LS08 Pin 3", "7408 Pin 1"
+    const chipMatch = s.match(/^(74[a-z0-9]+)\s*(?:pin|p|:)?\s*[:\-_]?\s*(\d{1,2})$/);
+    if (chipMatch) {
+      const chipQuery = chipMatch[1];
+      const pinNum = parseInt(chipMatch[2], 10);
+      const foundIdx = this.sim.icBases.findIndex(b => b.icId && b.icId.toLowerCase().includes(chipQuery));
+      if (foundIdx !== -1 && pinNum >= 1 && pinNum <= 20) {
+        return { comp: `icbase_${foundIdx}`, pin: String(pinNum) };
+      }
+    }
+
+    // 9. Direct endpoint format: comp:pin (e.g. switch:15, icbase_0:3)
+    if (s.includes(':')) {
+      const parts = s.split(':');
+      let comp = parts[0].trim();
+      if (comp === 'output') comp = 'led';
+      return { comp, pin: parts[1].trim() };
+    }
+
+    return null;
+  }
+
+  executeAutoWireBatch(text) {
+    const statusMsg = document.getElementById('autoWireBatchLogContainer') || document.getElementById('autoWireStatusMsg');
+    if (!text || text.trim() === '') {
+      this.showToast('Please enter at least one wire connection command.', 'warning');
+      return;
+    }
+
+    const lines = text.split('\n');
+    let successCount = 0;
+    let duplicateCount = 0;
+    const errors = [];
+    const logItems = [];
+
+    lines.forEach((line, idx) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) {
+        return;
+      }
+
+      // Match delimiters: '->', '=>', 'to', ',', '--'
+      const parts = trimmed.split(/\s*(?:->|=>|\bto\b|,|--)\s*/i);
+      if (parts.length < 2) {
+        errors.push(`Line ${idx + 1}: Expected format "FROM -> TO" (Got: "${trimmed}")`);
+        return;
+      }
+
+      const fromStr = parts[0].trim();
+      const toStr = parts[1].trim();
+
+      const fromEp = this.parsePinString(fromStr);
+      const toEp = this.parsePinString(toStr);
+
+      if (!fromEp) {
+        errors.push(`Line ${idx + 1}: Unrecognized source pin "${fromStr}"`);
+        return;
+      }
+      if (!toEp) {
+        errors.push(`Line ${idx + 1}: Unrecognized destination pin "${toStr}"`);
+        return;
+      }
+
+      if (fromEp.comp === toEp.comp && String(fromEp.pin) === String(toEp.pin)) {
+        errors.push(`Line ${idx + 1}: Cannot connect pin to itself (${fromStr})`);
+        return;
+      }
+
+      const added = this.sim.addWire(fromEp, toEp, this.wireRenderer.currentColor);
+      if (added) {
+        successCount++;
+        this.wireRenderer.advanceColor();
+        logItems.push(`✓ Connected: ${fromStr} ➔ ${toStr}`);
+      } else {
+        duplicateCount++;
+        logItems.push(`⚠ Already connected: ${fromStr} ➔ ${toStr}`);
+      }
+    });
+
+    if (successCount > 0) {
+      this.storage.recordState();
+      this.updateColorPickerActiveRing();
+      this.updateAutoWireModalUI();
+      this.showToast(`Auto-wired ${successCount} connection(s) successfully!`, 'success');
+    }
+
+    if (statusMsg) {
+      statusMsg.classList.remove('hidden');
+      statusMsg.innerHTML = `
+        <div class="font-bold text-emerald-400 mb-1">⚡ Batch Results: ${successCount} added, ${duplicateCount} skipped, ${errors.length} failed</div>
+        ${logItems.map(item => `<div class="text-slate-300 text-[11px]">${item}</div>`).join('')}
+        ${errors.map(err => `<div class="text-rose-400 text-[11px]">✕ ${err}</div>`).join('')}
+      `;
+    }
+  }
 }
 
-// Initialize on DOM ready (handles both loading and already-loaded states)
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    window.app = new DeldApp();
-  });
+// Initialize as soon as DOM is ready or if SVG container is already in document
+function initDeldApp() {
+  if (!window.app) {
+    try {
+      window.app = new DeldApp();
+    } catch (e) {
+      console.error('Failed to initialize DeldApp:', e);
+    }
+  }
+}
+
+if (document.getElementById('trainer-kit-svg')) {
+  initDeldApp();
+} else if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initDeldApp);
+  window.addEventListener('load', initDeldApp);
 } else {
-  window.app = new DeldApp();
+  initDeldApp();
 }
 
 

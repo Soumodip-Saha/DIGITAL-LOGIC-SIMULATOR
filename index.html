@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Untitled circuit | DELD Simulator (100% Free & Unlocked)</title>
   
-  <!-- Tailwind CSS CDN for utility styling -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS (Local for instant offline loading) -->
+  <script src="js/tailwind.min.js"></script>
   
   <!-- Google Fonts: Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -104,6 +104,22 @@
 
     <!-- Right Actions: Presets, Truth Table, Save, My Circuits, Share -->
     <div class="flex items-center gap-2">
+      <!-- Digital Logic Suite Dropdown Button -->
+      <button
+        id="navLogicSuiteBtn"
+        type="button"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold text-xs rounded-lg transition-all shadow-sm"
+        title="Open Digital Logic Suite (6 Tools)"
+      >
+        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
+        <span>Logic Suite (6)</span>
+        <svg class="w-3 h-3 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
       <!-- Lab Presets Quick Button -->
       <button
         id="openPresetsQuickBtn"
@@ -115,6 +131,19 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
         </svg>
         <span>Presets</span>
+      </button>
+
+      <!-- Auto-Wire System Button -->
+      <button
+        id="navAutoWireBtn"
+        type="button"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs rounded-lg transition-all shadow-sm"
+        title="Auto-Wire System: Connect pins via inputs or batch commands"
+      >
+        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+        <span>Auto-Wire</span>
       </button>
 
       <!-- Live Truth Table Button -->
@@ -178,11 +207,110 @@
     <!-- Floating Left Toolbars (2 white rounded pills matching screenshot) -->
     <aside class="floating-toolbar-container">
       <!-- Primary Tools Pill -->
-      <div class="floating-pill">
-        <!-- Select / Interact -->
-        <button class="tool-btn active" data-tool="select" title="Select & Toggle (Switches, Power, Pins)">
+      <div class="floating-pill relative">
+        <!-- Digital Logic Suite Trigger (matches DeldSim lightbulb) -->
+        <button id="floatingLogicSuiteBtn" class="tool-btn text-amber-500 hover:text-amber-600 focus:outline-none" data-action="logic-suite" title="Digital Logic Suite — 6 Tools">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+        </button>
+
+        <!-- Digital Logic Suite Flyout Menu (matches media_1788793646052.png exactly) -->
+        <div
+          id="logicSuiteDropdown"
+          class="hidden absolute left-14 top-0 w-80 bg-[#0f172a] border border-slate-700/90 rounded-2xl shadow-2xl p-2.5 z-50 text-left transition-all"
+        >
+          <!-- Header -->
+          <div class="px-3 pt-1.5 pb-2 text-[10px] font-extrabold text-slate-400 tracking-wider uppercase flex items-center justify-between border-b border-slate-800/80 mb-1">
+            <span>DIGITAL LOGIC SUITE — 6 TOOLS</span>
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          </div>
+
+          <!-- Item 1: K-Map Solver -->
+          <button type="button" data-tool-action="kmap" class="w-full flex items-start gap-3 p-2 rounded-xl hover:bg-slate-800/90 transition-all text-left group">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-amber-500/20 to-red-500/20 border border-amber-500/40 shadow-inner flex-shrink-0 group-hover:scale-105 transition-transform">
+              <svg class="w-5 h-5 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2"/>
+                <path d="M3 9h18M3 15h18M9 3v18M15 3v18" stroke-width="1.5"/>
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">K-Map Solver</div>
+              <div class="text-[11px] text-slate-400 font-normal leading-tight">Minimize Boolean expressions with Karnaugh Maps</div>
+            </div>
+          </button>
+
+          <!-- Item 2: Truth Table -->
+          <button type="button" data-tool-action="truth-table" class="w-full flex items-start gap-3 p-2 rounded-xl hover:bg-slate-800/90 transition-all text-left group">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-amber-500/20 border border-orange-500/40 shadow-inner flex-shrink-0 group-hover:scale-105 transition-transform">
+              <svg class="w-5 h-5 text-orange-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white group-hover:text-orange-300 transition-colors">Truth Table</div>
+              <div class="text-[11px] text-slate-400 font-normal leading-tight">Generate truth tables and signal waveforms</div>
+            </div>
+          </button>
+
+          <!-- Item 3: Algebraic Simplifier -->
+          <button type="button" data-tool-action="simplifier" class="w-full flex items-start gap-3 p-2 rounded-xl hover:bg-slate-800/90 transition-all text-left group">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-purple-500/20 to-indigo-500/20 border border-purple-500/40 shadow-inner flex-shrink-0 group-hover:scale-105 transition-transform">
+              <span class="text-lg font-black text-purple-400 font-serif">Σ</span>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white group-hover:text-purple-300 transition-colors">Algebraic Simplifier</div>
+              <div class="text-[11px] text-slate-400 font-normal leading-tight">Step-by-step simplification with Boolean laws</div>
+            </div>
+          </button>
+
+          <!-- Item 4: Circuit Diagram -->
+          <button type="button" data-tool-action="circuit" class="w-full flex items-start gap-3 p-2 rounded-xl hover:bg-slate-800/90 transition-all text-left group">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-sky-500/20 to-blue-500/20 border border-sky-500/40 shadow-inner flex-shrink-0 group-hover:scale-105 transition-transform">
+              <svg class="w-5 h-5 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h5m0 10H3m5-10v10c4 0 7-2 7-5s-3-5-7-5zm7 5h6" />
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white group-hover:text-sky-300 transition-colors">Circuit Diagram</div>
+              <div class="text-[11px] text-slate-400 font-normal leading-tight">Gate-level schematics with term & gate counts</div>
+            </div>
+          </button>
+
+          <!-- Item 5: Counter Designer -->
+          <button type="button" data-tool-action="counter" class="w-full flex items-start gap-3 p-2 rounded-xl hover:bg-slate-800/90 transition-all text-left group">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/40 shadow-inner flex-shrink-0 group-hover:scale-105 transition-transform">
+              <svg class="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle cx="12" cy="13" r="8" stroke-width="2"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4l2.5 2.5M12 5V2M10 2h4" />
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white group-hover:text-emerald-300 transition-colors">Counter Designer</div>
+              <div class="text-[11px] text-slate-400 font-normal leading-tight">MOD-N, binary, BCD, Gray & lockout-checked sequences</div>
+            </div>
+          </button>
+
+          <!-- Item 6: FSM Designer -->
+          <button type="button" data-tool-action="fsm" class="w-full flex items-start gap-3 p-2 rounded-xl hover:bg-slate-800/90 transition-all text-left group">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-pink-500/20 to-rose-500/20 border border-pink-500/40 shadow-inner flex-shrink-0 group-hover:scale-105 transition-transform">
+              <svg class="w-5 h-5 text-pink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle cx="7" cy="12" r="4" stroke-width="2"/>
+                <circle cx="17" cy="12" r="4" stroke-width="2"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8c2-3 8-3 10 0m0 8c-2 3-8 3-10 0" />
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white group-hover:text-pink-300 transition-colors">FSM Designer</div>
+              <div class="text-[11px] text-slate-400 font-normal leading-tight">State diagram to transition table & excitation equations</div>
+            </div>
+          </button>
+        </div>
+
+        <!-- Wire / Select Tool -->
+        <button id="toolBtnWire" class="tool-btn active" data-tool="wire" title="Wire Tool (Connect pins by click or drag - W)">
+          <svg class="w-5 h-5 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         </button>
 
@@ -259,6 +387,25 @@
       </button>
     </div>
 
+    <!-- Floating Persistent Pin Selection HUD (Absolute Pin Selection) -->
+    <div id="pinSelectionHUD" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-sky-500/80 rounded-2xl shadow-2xl px-5 py-2.5 text-white flex items-center gap-3 z-40 backdrop-blur-md transition-all">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-sky-400 animate-ping"></span>
+        <span class="text-xs font-semibold text-slate-300">Selected Pin:</span>
+        <span id="pinSelectionHUDLabel" class="text-xs font-extrabold text-sky-300 font-mono">SW 15</span>
+      </div>
+      <span class="text-slate-500 text-xs">➔</span>
+      <span class="text-xs font-semibold text-emerald-300 animate-pulse">
+        Click any pin to connect!
+      </span>
+      <div class="h-4 w-px bg-slate-700 mx-1"></div>
+      <button id="pinSelectionAutoWireBtn" type="button" class="text-xs font-bold text-cyan-300 hover:text-cyan-200 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors">
+        ⚡ Auto-Wire Dialog
+      </button>
+      <button id="pinSelectionCancelBtn" type="button" class="text-xs font-bold text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800 transition-colors">
+        ✕ Cancel
+      </button>
+    </div>
   </main>
 
   <!-- ==========================================
@@ -564,6 +711,491 @@
     </div>
   </div>
 
+  <!-- ==========================================
+       MODAL 7: DIGITAL LOGIC SUITE (6 TOOLS)
+       ========================================== -->
+  <div id="logic-suite-modal" class="modal-backdrop hidden">
+    <div class="modal-window w-full max-w-5xl p-0 overflow-hidden bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 bg-[#0f172a] text-white border-b border-slate-700/80">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-base font-extrabold tracking-wide uppercase">Digital Logic Suite</h2>
+              <span id="suiteActiveToolBadge" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                K-Map Solver
+              </span>
+            </div>
+            <p class="text-xs text-slate-400">Connected Digital Design Workspace • Solve → Build → Simulate</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <!-- Live Kit Sync Toggle -->
+          <div class="flex items-center gap-2 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700/80 shadow-xs">
+            <span class="relative flex h-2.5 w-2.5">
+              <span id="suiteLiveDotPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span id="suiteLiveDot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            <span class="text-[11px] font-bold text-slate-300">Kit Live Sync:</span>
+            <button
+              id="suiteLiveSyncToggle"
+              type="button"
+              class="text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-xs cursor-pointer"
+              title="Toggle Live Circuit Synchronization: Analyzes the physical kit circuit in real-time"
+            >
+              LIVE ON
+            </button>
+          </div>
+
+          <!-- Solve -> Build Button -->
+          <button
+            id="suiteBuildCircuitBtn"
+            type="button"
+            class="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-xs shadow-lg shadow-emerald-900/30 transition-all hover:scale-105 active:scale-95"
+            title="Wire this circuit onto the Virtual Trainer Kit with real 74LS ICs"
+          >
+            <span class="text-amber-300 text-sm">⚡</span>
+            <span>Build on Trainer Kit</span>
+          </button>
+
+          <!-- Close Modal -->
+          <button type="button" class="modal-close-btn text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs (6 Tools) -->
+      <div class="flex items-center gap-1 px-6 pt-3 bg-slate-900 border-b border-slate-800 overflow-x-auto text-xs font-semibold select-none">
+        <button data-suite-tab="kmap" class="suite-tab-btn active px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-amber-400 border-amber-400 bg-slate-800/80">
+          🧮 K-Map Solver
+        </button>
+        <button data-suite-tab="truth-table" class="suite-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200">
+          📋 Truth Table & Waveform
+        </button>
+        <button data-suite-tab="simplifier" class="suite-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200">
+          ∑ Algebraic Simplifier
+        </button>
+        <button data-suite-tab="circuit" class="suite-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200">
+          📐 Circuit Diagram
+        </button>
+        <button data-suite-tab="counter" class="suite-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200">
+          ⏱️ Counter Designer
+        </button>
+        <button data-suite-tab="fsm" class="suite-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200">
+          🔄 FSM Designer
+        </button>
+      </div>
+
+      <!-- Live Circuit Status Banner -->
+      <div id="suiteLiveCircuitBanner" class="px-6 py-2 bg-emerald-950/70 border-b border-emerald-800/60 flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-emerald-200 select-none">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="suiteLiveCircuitSummary" class="font-bold">Analyzing Live Kit Circuit...</span>
+        </div>
+        <div class="flex items-center gap-2 text-[11px]">
+          <span id="suiteLiveInputState" class="bg-emerald-900/60 px-2 py-0.5 rounded border border-emerald-700">Inputs: SW0=0, SW1=0</span>
+          <div id="suiteOutputSelectWrapper" class="hidden flex items-center gap-1.5 bg-emerald-900/80 px-2 py-0.5 rounded border border-emerald-600">
+            <label for="suiteOutputSelect" class="font-bold text-emerald-300">Target Output:</label>
+            <select id="suiteOutputSelect" class="bg-emerald-950 text-emerald-200 border border-emerald-700 text-xs font-mono rounded px-1.5 py-0.5 outline-none cursor-pointer"></select>
+          </div>
+          <span id="suiteLiveOutputState" class="bg-emerald-900/60 px-2 py-0.5 rounded border border-emerald-700 font-extrabold text-amber-300">Output: OUT0=0 (LOW)</span>
+        </div>
+      </div>
+
+      <!-- Tab Body Container -->
+      <div class="p-6 overflow-y-auto flex-1 bg-slate-50" style="max-height: calc(90vh - 125px);">
+        <!-- Tab 1: K-Map Solver -->
+        <div id="suiteTabPanel_kmap" class="suite-tab-panel space-y-5">
+          <!-- Variables & Controls Bar -->
+          <div class="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-slate-700">Variables:</span>
+              <div class="flex rounded-xl bg-slate-100 p-1 border border-slate-200 text-xs font-bold">
+                <button data-kmap-vars="2" class="kmap-var-btn px-3 py-1 rounded-lg text-slate-600 hover:text-slate-900 transition-colors">2 (A, B)</button>
+                <button data-kmap-vars="3" class="kmap-var-btn px-3 py-1 rounded-lg bg-white text-amber-600 shadow-xs transition-colors">3 (A, B, C)</button>
+                <button data-kmap-vars="4" class="kmap-var-btn px-3 py-1 rounded-lg text-slate-600 hover:text-slate-900 transition-colors">4 (A, B, C, D)</button>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button id="kmapClearBtn" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
+                Reset to 0s
+              </button>
+              <button id="kmapFillOnesBtn" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
+                Fill 1s
+              </button>
+              <div class="text-[11px] text-slate-400 italic">Click cells to cycle: 0 → 1 → X (Don't Care)</div>
+            </div>
+          </div>
+
+          <!-- K-Map Interactive Grid & Groups Card -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <!-- Left: Karnaugh Map Grid -->
+            <div class="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col items-center justify-center min-h-[300px]">
+              <div class="w-full flex items-center justify-between mb-3 text-xs text-slate-500 font-semibold">
+                <span class="flex items-center gap-1.5">
+                  <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                  <span>Karnaugh Map Grid (Gray Code Mapped)</span>
+                </span>
+                <span id="kmapMintermsSummary" class="font-mono text-sky-600 font-bold">Σ m(1, 2, 5, 7)</span>
+              </div>
+
+              <!-- Interactive Grid Container -->
+              <div id="kmapGridContainer" class="relative my-2 select-none overflow-x-auto p-2"></div>
+            </div>
+
+            <!-- Right: Minimized Results & Quine-McCluskey Steps -->
+            <div class="lg:col-span-5 flex flex-col gap-4">
+              <!-- Minimized Equation Card -->
+              <div class="bg-gradient-to-br from-slate-900 to-slate-800 p-5 rounded-2xl border border-slate-700 text-white shadow-md">
+                <div class="text-[10px] font-extrabold uppercase tracking-wider text-amber-400 mb-1">
+                  Minimized SOP Expression
+                </div>
+                <div id="kmapMinimizedSOP" class="text-xl font-black font-mono tracking-wide text-white py-1">
+                  F = A'B + AB'C
+                </div>
+                <div class="mt-3 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-300">
+                  <span id="kmapGateCountBadge">Gates: 2 AND + 1 OR</span>
+                  <button id="copyKMapSOPBtn" class="text-[11px] px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 font-semibold transition-colors">
+                    Copy SOP
+                  </button>
+                </div>
+              </div>
+
+              <!-- Prime Implicant Groups List -->
+              <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex-1">
+                <div class="text-xs font-bold text-slate-800 mb-2 flex items-center justify-between">
+                  <span>Prime Implicant Groups</span>
+                  <span id="kmapGroupCount" class="text-[11px] font-semibold text-slate-400">2 Groups</span>
+                </div>
+                <div id="kmapGroupsList" class="space-y-2 text-xs"></div>
+              </div>
+
+              <!-- Quine-McCluskey Passes -->
+              <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <div class="text-xs font-bold text-slate-800 mb-2">Quine-McCluskey Tabular Check</div>
+                <div id="kmapQMSteps" class="text-[11px] font-mono text-slate-600 space-y-1 bg-slate-50 p-2.5 rounded-xl border border-slate-200 max-h-28 overflow-y-auto"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Truth Table & Waveform -->
+        <div id="suiteTabPanel_truth-table" class="suite-tab-panel hidden space-y-5">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <!-- Left: Truth Table -->
+            <div class="lg:col-span-5 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col">
+              <div class="flex items-center justify-between mb-3 text-xs font-bold text-slate-800">
+                <span>Complete Truth Table</span>
+                <span id="ttStandardForms" class="text-[10px] font-mono text-slate-500"></span>
+              </div>
+              <div id="suiteTruthTableContainer" class="overflow-y-auto max-h-[50vh] border border-slate-200 rounded-xl"></div>
+            </div>
+
+            <!-- Right: Synced Timing Waveform -->
+            <div class="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col">
+              <div class="flex items-center justify-between mb-3 text-xs font-bold text-slate-800">
+                <span class="flex items-center gap-1.5">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>Synced Digital Timing Waveform (Logic Analyzer)</span>
+                </span>
+                <span class="text-[10px] text-slate-400">Clock synced to truth table steps</span>
+              </div>
+              <div id="suiteWaveformContainer" class="flex-1 bg-[#0b1329] border border-slate-700/60 rounded-xl p-4 overflow-x-auto min-h-[350px]">
+                <canvas id="suiteWaveformCanvas" width="560" height="320" class="w-full"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Algebraic Simplifier -->
+        <div id="suiteTabPanel_simplifier" class="suite-tab-panel hidden space-y-5">
+          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <div class="text-xs font-bold text-slate-700">Expression & Presets:</div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button class="algebraic-preset-btn px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700" data-preset="consensus">
+                Consensus Theorem (AB + A'C + BC)
+              </button>
+              <button class="algebraic-preset-btn px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700" data-preset="absorption">
+                Absorption Law (A + AB)
+              </button>
+              <button class="algebraic-preset-btn px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700" data-preset="demorgan">
+                De Morgan's Proof ((A + B)')
+              </button>
+              <button class="algebraic-preset-btn px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700" data-preset="current">
+                Current K-Map Expression
+              </button>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="text-xs font-bold text-slate-800 mb-3 flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+              <span>Step-by-Step Proof with Named Boolean Laws</span>
+            </div>
+            <div id="suiteAlgebraicStepsContainer" class="space-y-3"></div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Circuit Diagram -->
+        <div id="suiteTabPanel_circuit" class="suite-tab-panel hidden space-y-5">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <!-- Unsimplified Schematic -->
+            <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col">
+              <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                <span class="text-xs font-bold text-slate-800">Original (Unsimplified Canonical SOP)</span>
+                <span id="circuitOrigGatesBadge" class="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">7 Gates</span>
+              </div>
+              <div id="circuitOrigSvgContainer" class="flex-1 min-h-[260px] flex items-center justify-center bg-slate-50 rounded-xl border border-slate-200 p-2"></div>
+            </div>
+
+            <!-- Minimized Schematic -->
+            <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col">
+              <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                <span class="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  <span>Minimized Gate Schematic</span>
+                </span>
+                <span id="circuitMinGatesBadge" class="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">3 Gates (57% reduction)</span>
+              </div>
+              <div id="circuitMinSvgContainer" class="flex-1 min-h-[260px] flex items-center justify-center bg-emerald-50/30 rounded-xl border border-emerald-200/60 p-2"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 5: Counter Designer -->
+        <div id="suiteTabPanel_counter" class="suite-tab-panel hidden space-y-5">
+          <!-- Counter Settings -->
+          <div class="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center gap-3">
+              <label class="text-xs font-bold text-slate-700">Sequence:</label>
+              <select id="counterSeqSelect" class="text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 outline-none">
+                <option value="bcd">BCD Decade (0 to 9)</option>
+                <option value="binary">3-Bit Binary (0 to 7)</option>
+                <option value="binary4">4-Bit Binary (0 to 15)</option>
+                <option value="gray">3-Bit Gray Code</option>
+                <option value="johnson">3-Bit Johnson Counter</option>
+                <option value="ring">4-Bit Ring Counter</option>
+              </select>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <label class="text-xs font-bold text-slate-700">Flip-Flop Type:</label>
+              <select id="counterFFSelect" class="text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 outline-none">
+                <option value="D">D Flip-Flop (74LS74)</option>
+                <option value="JK">JK Flip-Flop (74LS73)</option>
+                <option value="T">T Flip-Flop</option>
+              </select>
+            </div>
+
+            <!-- Live Clock Stepper Controls -->
+            <div class="flex items-center gap-2">
+              <span id="counterLiveStateBadge" class="text-xs font-extrabold px-3 py-1.5 rounded-xl bg-emerald-100 text-emerald-800 border border-emerald-300">State: S0 (0000)</span>
+              <button id="counterStepClockBtn" type="button" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-xs shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer">
+                <span>⚡ Step Clock Pulse</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Lockout Card & Transition Table -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <!-- Left: Lockout Recovery & Excitation Equations -->
+            <div class="lg:col-span-6 space-y-4">
+              <!-- Lockout Status Card -->
+              <div id="counterLockoutCard" class="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-xs text-emerald-800">
+                <div class="font-bold flex items-center gap-1.5 mb-1">
+                  <span class="text-emerald-600 text-sm">✓</span>
+                  <span>Self-Starting Lockout Recovery Verified</span>
+                </div>
+                <div id="counterLockoutText" class="text-[11px] leading-relaxed">
+                  All unused states automatically recover into the active sequence within 1 clock pulse.
+                </div>
+              </div>
+
+              <!-- Excitation Equations -->
+              <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div class="text-xs font-bold text-slate-800 mb-3">Flip-Flop Excitation Equations</div>
+                <div id="counterExcitationList" class="space-y-2 text-xs font-mono"></div>
+              </div>
+            </div>
+
+            <!-- Right: State Sequence Flow -->
+            <div class="lg:col-span-6 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <div class="text-xs font-bold text-slate-800 mb-3">State Sequence & Next State Transitions</div>
+              <div id="counterTransitionsList" class="max-h-72 overflow-y-auto space-y-1.5 text-xs font-mono"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 6: FSM Designer -->
+        <div id="suiteTabPanel_fsm" class="suite-tab-panel hidden space-y-5">
+          <!-- Preset Selector -->
+          <div class="flex items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <label class="text-xs font-bold text-slate-700">FSM Architecture Preset:</label>
+            <select id="fsmPresetSelect" class="text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 outline-none">
+              <option value="seq101">Sequence Detector "101" (Mealy Machine)</option>
+              <option value="traffic">Traffic Light Controller (Moore Machine)</option>
+            </select>
+
+            <div class="flex items-center gap-2 ml-auto">
+              <span id="fsmLiveStateBadge" class="text-xs font-extrabold px-3 py-1.5 rounded-xl bg-purple-100 text-purple-800 border border-purple-300">State: S0</span>
+              <span id="fsmLiveInputBadge" class="text-xs font-bold px-2 py-1.5 rounded-xl bg-slate-100 text-slate-700 border border-slate-300">Input X: SW0=0</span>
+              <button id="fsmStepClockBtn" type="button" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer">
+                <span>⚡ Step FSM Clock</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <!-- Left: State Transition Graph -->
+            <div class="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col">
+              <div class="text-xs font-bold text-slate-800 mb-3">Interactive State Diagram</div>
+              <div id="fsmDiagramContainer" class="flex-1 min-h-[300px] flex items-center justify-center bg-slate-50 rounded-xl border border-slate-200 p-3"></div>
+            </div>
+
+            <!-- Right: Transition Table & Equations -->
+            <div class="lg:col-span-5 space-y-4">
+              <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div class="text-xs font-bold text-slate-800 mb-2">State Encoding & Transitions</div>
+                <div id="fsmTransitionsTable" class="text-xs font-mono max-h-48 overflow-y-auto"></div>
+              </div>
+
+              <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div class="text-xs font-bold text-slate-800 mb-2">Next-State & Output Logic</div>
+                <div id="fsmEquationsList" class="space-y-1.5 text-xs font-mono text-slate-700"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ==========================================
+       MODAL 8: AUTO-WIRE & PIN CONNECTION SYSTEM
+       ========================================== -->
+  <div id="auto-wire-modal" class="modal-backdrop hidden">
+    <div class="modal-window w-full max-w-2xl p-0 overflow-hidden bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 bg-[#0f172a] text-white border-b border-slate-700/80">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-md">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-base font-extrabold tracking-wide uppercase">Auto-Wire & Pin Connection System</h2>
+            <p class="text-xs text-slate-400">Specify pins by dropdown or text command to form wires automatically</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Mode Tabs -->
+      <div class="flex items-center gap-2 px-6 pt-3 bg-slate-900 border-b border-slate-800 text-xs font-semibold select-none">
+        <button id="tabAutoWireDropdownBtn" type="button" class="auto-wire-tab-btn active px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-cyan-400 border-cyan-400 bg-slate-800/80">
+          🔌 Pin Selector (Point-to-Point)
+        </button>
+        <button id="tabAutoWireBatchBtn" type="button" class="auto-wire-tab-btn px-4 py-2.5 rounded-t-xl border-b-2 font-bold transition-all text-slate-400 border-transparent hover:text-slate-200">
+          📝 Batch Text Connect (Commands)
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-6 overflow-y-auto flex-1 bg-slate-50 space-y-5" style="max-height: calc(90vh - 130px);">
+        
+        <!-- Section 1: Dropdown Pin Pair Connect -->
+        <div id="autoWireDropdownSection" class="space-y-4">
+          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <div class="text-xs font-bold text-slate-800 flex items-center justify-between">
+              <span>Select Terminals to Connect:</span>
+              <span class="text-[11px] text-slate-400 font-normal">Wires are routed with Manhattan 90° bends</span>
+            </div>
+
+            <!-- From and To Selectors Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- From Pin -->
+              <div class="space-y-1.5">
+                <label class="block text-xs font-bold text-sky-700">Source Pin (From):</label>
+                <select id="autoWireFromSelect" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-800 outline-none focus:border-sky-500 focus:bg-white transition-all"></select>
+              </div>
+
+              <!-- To Pin -->
+              <div class="space-y-1.5">
+                <label class="block text-xs font-bold text-emerald-700">Destination Pin (To):</label>
+                <select id="autoWireToSelect" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-800 outline-none focus:border-emerald-500 focus:bg-white transition-all"></select>
+              </div>
+            </div>
+
+            <!-- Wire Color and Connect Action -->
+            <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+              <div class="flex items-center gap-2">
+                <label class="text-xs font-bold text-slate-600">Wire Color:</label>
+                <div id="autoWireColorSwatches" class="flex items-center gap-1.5"></div>
+              </div>
+
+              <button id="autoWireSingleConnectBtn" type="button" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-xs shadow-md transition-all hover:scale-105 active:scale-95 flex items-center gap-2 cursor-pointer">
+                <span>Connect Wire</span>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Batch Text Connect -->
+        <div id="autoWireBatchSection" class="hidden space-y-4">
+          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold text-slate-800">Enter Connections (one per line):</label>
+              <span class="text-[11px] text-slate-400">e.g. SW15 -> IC1 Pin 1</span>
+            </div>
+
+            <textarea id="autoWireBatchInput" rows="6" placeholder="SW 15 -> IC1 Pin 1&#10;SW 14 -> IC1 Pin 2&#10;IC1 Pin 3 -> OUT 13&#10;VCC -> IC1 Pin 14&#10;GND -> IC1 Pin 7" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs font-mono text-slate-800 outline-none focus:border-cyan-500 focus:bg-white transition-all resize-none"></textarea>
+
+            <!-- Quick Syntax Insertion Buttons -->
+            <div class="flex flex-wrap items-center gap-2 pt-1 text-xs">
+              <span class="text-slate-400 font-semibold text-[11px]">Quick Insert:</span>
+              <button type="button" class="batch-insert-btn px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[11px]" data-text="SW 15 -> IC1 Pin 1">+ SW15 ➔ IC1 Pin 1</button>
+              <button type="button" class="batch-insert-btn px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[11px]" data-text="IC1 Pin 3 -> OUT 13">+ IC1 Pin 3 ➔ OUT 13</button>
+              <button type="button" class="batch-insert-btn px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[11px]" data-text="VCC -> IC1 Pin 14&#10;GND -> IC1 Pin 7">+ VCC/GND Power</button>
+            </div>
+
+            <div class="flex justify-end pt-2">
+              <button id="autoWireBatchExecuteBtn" type="button" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs shadow-md transition-all hover:scale-105 active:scale-95 flex items-center gap-2 cursor-pointer">
+                <span>⚡ Auto-Connect All Wires</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Batch Execution Result Log -->
+          <div id="autoWireBatchLogContainer" class="hidden bg-slate-900 text-slate-200 p-4 rounded-xl font-mono text-xs max-h-40 overflow-y-auto space-y-1"></div>
+        </div>
+
+        <!-- Active Wires Table in Circuit -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+          <div class="flex items-center justify-between text-xs font-bold text-slate-800">
+            <span>Currently Connected Wires (<span id="autoWireActiveCount">0</span>)</span>
+            <button id="autoWireClearAllWiresBtn" type="button" class="text-red-600 hover:text-red-700 text-xs font-semibold hover:underline cursor-pointer">
+              Disconnect All Wires
+            </button>
+          </div>
+          <div id="autoWireExistingList" class="max-h-48 overflow-y-auto space-y-1.5 text-xs font-mono"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
   <!-- Hidden File Input for Circuit JSON Import -->
   <input type="file" id="circuitFileInput" accept=".json" class="hidden" />
 
