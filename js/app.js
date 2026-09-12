@@ -665,7 +665,7 @@ class DeldApp {
               ${ic.id}
             </span>
             <span class="text-xs font-semibold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
-              ${ic.category.toUpperCase()}
+              ${(ic.category || 'logic').toUpperCase()}
             </span>
           </div>
           <h3 class="text-sm font-bold text-slate-900 group-hover:text-sky-600 transition-colors">${ic.name}</h3>

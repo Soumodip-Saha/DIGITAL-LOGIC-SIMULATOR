@@ -11,7 +11,8 @@ export const IC_CATEGORIES = {
   ARITHMETIC: 'arithmetic',
   FLIP_FLOPS: 'flip_flops',
   COUNTERS: 'counters',
-  REGISTERS: 'registers'
+  REGISTERS: 'registers',
+  SEQUENTIAL: 'flip_flops'
 };
 
 export const IC_LIBRARY = {
@@ -1442,7 +1443,7 @@ export const IC_LIBRARY = {
   '74LS73': {
     id: '74LS73',
     name: '74LS73 Dual J-K Flip-Flop with Clear',
-    category: IC_CATEGORIES.SEQUENTIAL,
+    category: IC_CATEGORIES.FLIP_FLOPS,
     pins: 14,
     description: 'Two independent J-K flip-flops with pulse-triggered negative-edge clocks and asynchronous active-low reset.',
     pinout: {

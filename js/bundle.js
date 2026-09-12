@@ -21,7 +21,8 @@ const IC_CATEGORIES = {
   ARITHMETIC: 'arithmetic',
   FLIP_FLOPS: 'flip_flops',
   COUNTERS: 'counters',
-  REGISTERS: 'registers'
+  REGISTERS: 'registers',
+  SEQUENTIAL: 'flip_flops'
 };
 
 const IC_LIBRARY = {
@@ -1452,7 +1453,7 @@ const IC_LIBRARY = {
   '74LS73': {
     id: '74LS73',
     name: '74LS73 Dual J-K Flip-Flop with Clear',
-    category: IC_CATEGORIES.SEQUENTIAL,
+    category: IC_CATEGORIES.FLIP_FLOPS,
     pins: 14,
     description: 'Two independent J-K flip-flops with pulse-triggered negative-edge clocks and asynchronous active-low reset.',
     pinout: {
@@ -6984,7 +6985,7 @@ class DeldApp {
               ${ic.id}
             </span>
             <span class="text-xs font-semibold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
-              ${ic.category.toUpperCase()}
+              ${(ic.category || 'logic').toUpperCase()}
             </span>
           </div>
           <h3 class="text-sm font-bold text-slate-900 group-hover:text-sky-600 transition-colors">${ic.name}</h3>
