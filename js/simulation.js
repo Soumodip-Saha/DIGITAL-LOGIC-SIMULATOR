@@ -639,14 +639,14 @@ export class CircuitSimulator {
     }
 
     const N = activeSwitches.length;
-    if (N > 8) {
+    if (N > 11) {
       return {
         inputs: activeSwitches,
         outputs: activeLeds,
         activeICs,
         rows: [],
         liveRowIndex: -1,
-        emptyReason: `Too many input switches connected (${N} switches). Truth table supports up to 8 inputs (256 combinations).`
+        emptyReason: `Circuit has ${N} input switches connected. Truth table supports up to 11 inputs (2,048 combinations). For larger circuits, test combinations live directly using the switches on the Trainer Kit.`
       };
     }
 

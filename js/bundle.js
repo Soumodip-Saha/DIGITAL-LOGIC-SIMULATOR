@@ -537,6 +537,47 @@ const IC_LIBRARY = {
     }
   },
 
+  '74LS266': {
+    id: '74LS266',
+    name: '74LS266 Quad 2-Input Exclusive-NOR (XNOR) Gate',
+    category: IC_CATEGORIES.GATES,
+    pins: 14,
+    description: 'Contains four independent 2-input Exclusive-NOR (equality comparator) gates.',
+    pinout: {
+      1: { name: '1A', type: 'input', desc: 'Gate 1 Input A' },
+      2: { name: '1B', type: 'input', desc: 'Gate 1 Input B' },
+      3: { name: '1Y', type: 'output', desc: 'Gate 1 Output (XNOR)' },
+      4: { name: '2A', type: 'input', desc: 'Gate 2 Input A' },
+      5: { name: '2B', type: 'input', desc: 'Gate 2 Input B' },
+      6: { name: '2Y', type: 'output', desc: 'Gate 2 Output (XNOR)' },
+      7: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      8: { name: '3Y', type: 'output', desc: 'Gate 3 Output (XNOR)' },
+      9: { name: '3A', type: 'input', desc: 'Gate 3 Input A' },
+      10: { name: '3B', type: 'input', desc: 'Gate 3 Input B' },
+      11: { name: '4Y', type: 'output', desc: 'Gate 4 Output (XNOR)' },
+      12: { name: '4A', type: 'input', desc: 'Gate 4 Input A' },
+      13: { name: '4B', type: 'input', desc: 'Gate 4 Input B' },
+      14: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['Input A', 'Input B', 'Output Y (XNOR)'],
+      rows: [
+        ['0', '0', '1'],
+        ['0', '1', '0'],
+        ['1', '0', '0'],
+        ['1', '1', '1']
+      ]
+    },
+    simulate: (inputs) => {
+      return {
+        3: ((inputs[1] || 0) ^ (inputs[2] || 0)) === 0 ? 1 : 0,
+        6: ((inputs[4] || 0) ^ (inputs[5] || 0)) === 0 ? 1 : 0,
+        8: ((inputs[9] || 0) ^ (inputs[10] || 0)) === 0 ? 1 : 0,
+        11: ((inputs[12] || 0) ^ (inputs[13] || 0)) === 0 ? 1 : 0
+      };
+    }
+  },
+
   // ==========================================
   // ARITHMETIC & COMPARATORS
   // ==========================================
@@ -844,6 +885,143 @@ const IC_LIBRARY = {
       }
 
       return { 7: y1, 9: y2 };
+    }
+  },
+
+  '74LS157': {
+    id: '74LS157',
+    name: '74LS157 Quad 2-Line to 1-Line Data Selector / Multiplexer',
+    category: IC_CATEGORIES.COMBINATIONAL,
+    pins: 16,
+    description: 'Four 2-to-1 multiplexers with a common Select input and active-low Strobe/Enable.',
+    pinout: {
+      1: { name: 'S', type: 'input', desc: 'Common Select Input (0=A, 1=B)' },
+      2: { name: '1A', type: 'input', desc: 'MUX 1 Input A' },
+      3: { name: '1B', type: 'input', desc: 'MUX 1 Input B' },
+      4: { name: '1Y', type: 'output', desc: 'MUX 1 Output' },
+      5: { name: '2A', type: 'input', desc: 'MUX 2 Input A' },
+      6: { name: '2B', type: 'input', desc: 'MUX 2 Input B' },
+      7: { name: '2Y', type: 'output', desc: 'MUX 2 Output' },
+      8: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      9: { name: '3Y', type: 'output', desc: 'MUX 3 Output' },
+      10: { name: '3B', type: 'input', desc: 'MUX 3 Input B' },
+      11: { name: '3A', type: 'input', desc: 'MUX 3 Input A' },
+      12: { name: '4Y', type: 'output', desc: 'MUX 4 Output' },
+      13: { name: '4B', type: 'input', desc: 'MUX 4 Input B' },
+      14: { name: '4A', type: 'input', desc: 'MUX 4 Input A' },
+      15: { name: 'G#', type: 'input', desc: 'Strobe / Enable (Active Low)' },
+      16: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['G# (Strobe)', 'S (Select)', 'A Inputs', 'B Inputs', 'Outputs 1Y-4Y'],
+      rows: [
+        ['1', 'X', 'X', 'X', 'All LOW (0 0 0 0)'],
+        ['0', '0', 'Data A', 'X', 'Follows A (1A, 2A, 3A, 4A)'],
+        ['0', '1', 'X', 'Data B', 'Follows B (1B, 2B, 3B, 4B)']
+      ]
+    },
+    simulate: (inputs) => {
+      const strobe = inputs[15] !== undefined ? inputs[15] : 0;
+      if (strobe === 1) {
+        return { 4: 0, 7: 0, 9: 0, 12: 0 };
+      }
+      const sel = inputs[1] || 0;
+      if (sel === 0) {
+        return {
+          4: inputs[2] || 0,
+          7: inputs[5] || 0,
+          9: inputs[11] || 0,
+          12: inputs[14] || 0
+        };
+      } else {
+        return {
+          4: inputs[3] || 0,
+          7: inputs[6] || 0,
+          9: inputs[10] || 0,
+          12: inputs[13] || 0
+        };
+      }
+    }
+  },
+
+  '74LS148': {
+    id: '74LS148',
+    name: '74LS148 8-to-3 Line Priority Encoder',
+    category: IC_CATEGORIES.COMBINATIONAL,
+    pins: 16,
+    description: 'Encodes 8 active-low data inputs (0#..7#) to a 3-bit active-low binary code (A2#..A0#), with active-low Group Select (GS#) and Enable Output (EO#) for cascading.',
+    pinout: {
+      1: { name: '4#', type: 'input', desc: 'Input 4 (Active Low)' },
+      2: { name: '5#', type: 'input', desc: 'Input 5 (Active Low)' },
+      3: { name: '6#', type: 'input', desc: 'Input 6 (Active Low)' },
+      4: { name: '7#', type: 'input', desc: 'Input 7 (Active Low, Highest Priority)' },
+      5: { name: 'EI#', type: 'input', desc: 'Enable Input (Active Low)' },
+      6: { name: 'A2#', type: 'output', desc: 'Binary Address Output 2 (Active Low)' },
+      7: { name: 'A1#', type: 'output', desc: 'Binary Address Output 1 (Active Low)' },
+      8: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      9: { name: 'A0#', type: 'output', desc: 'Binary Address Output 0 (Active Low)' },
+      10: { name: '0#', type: 'input', desc: 'Input 0 (Active Low, Lowest Priority)' },
+      11: { name: '1#', type: 'input', desc: 'Input 1 (Active Low)' },
+      12: { name: '2#', type: 'input', desc: 'Input 2 (Active Low)' },
+      13: { name: '3#', type: 'input', desc: 'Input 3 (Active Low)' },
+      14: { name: 'GS#', type: 'output', desc: 'Group Select Output (Active Low)' },
+      15: { name: 'EO#', type: 'output', desc: 'Enable Output (Active Low)' },
+      16: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['EI#', '0#', '1#', '2#', '3#', '4#', '5#', '6#', '7#', 'A2#', 'A1#', 'A0#', 'GS#', 'EO#'],
+      rows: [
+        ['1', 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X', '1', '1', '1', '1', '1'],
+        ['0', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '0'],
+        ['0', 'X', 'X', 'X', 'X', 'X', 'X', 'X', '0', '0', '0', '0', '0', '1'],
+        ['0', 'X', 'X', 'X', 'X', 'X', 'X', '0', '1', '0', '0', '1', '0', '1'],
+        ['0', 'X', 'X', 'X', 'X', 'X', '0', '1', '1', '0', '1', '0', '0', '1'],
+        ['0', 'X', 'X', 'X', 'X', '0', '1', '1', '1', '0', '1', '1', '0', '1'],
+        ['0', 'X', 'X', 'X', '0', '1', '1', '1', '1', '1', '0', '0', '0', '1'],
+        ['0', 'X', 'X', '0', '1', '1', '1', '1', '1', '1', '0', '1', '0', '1'],
+        ['0', 'X', '0', '1', '1', '1', '1', '1', '1', '1', '1', '0', '0', '1'],
+        ['0', '0', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '0', '1']
+      ]
+    },
+    simulate: (inputs) => {
+      const ei = inputs[5] !== undefined ? inputs[5] : 0;
+      if (ei === 1) {
+        return { 6: 1, 7: 1, 9: 1, 14: 1, 15: 1 };
+      }
+      const inputPins = [
+        { num: 7, pin: 4 },
+        { num: 6, pin: 3 },
+        { num: 5, pin: 2 },
+        { num: 4, pin: 1 },
+        { num: 3, pin: 13 },
+        { num: 2, pin: 12 },
+        { num: 1, pin: 11 },
+        { num: 0, pin: 10 }
+      ];
+
+      let activeIndex = -1;
+      for (const item of inputPins) {
+        if (inputs[item.pin] === 0) {
+          activeIndex = item.num;
+          break;
+        }
+      }
+
+      if (activeIndex === -1) {
+        return { 6: 1, 7: 1, 9: 1, 14: 1, 15: 0 };
+      }
+
+      const a2 = ((activeIndex >> 2) & 1) === 1 ? 0 : 1;
+      const a1 = ((activeIndex >> 1) & 1) === 1 ? 0 : 1;
+      const a0 = ((activeIndex >> 0) & 1) === 1 ? 0 : 1;
+
+      return {
+        6: a2,
+        7: a1,
+        9: a0,
+        14: 0,
+        15: 1
+      };
     }
   },
 
@@ -1262,6 +1440,15 @@ const IC_LIBRARY = {
       count: 0,
       clk_prev: 0
     }),
+    truthTable: {
+      headers: ['LOAD#', 'CTEN#', 'D/U#', 'CLK', 'Mode / Action'],
+      rows: [
+        ['0', 'X', 'X', 'X', 'Asynchronous Parallel Load (QA..QD ← A..D)'],
+        ['1', '1', 'X', 'X', 'Inhibit / Hold (No change)'],
+        ['1', '0', '0', '↑', 'Count Up (Binary increment modulo-16)'],
+        ['1', '0', '1', '↑', 'Count Down (Binary decrement modulo-16)']
+      ]
+    },
     simulate: (inputs, state) => {
       const load = inputs[11] !== undefined ? inputs[11] : 1;
       const clk = inputs[14] || 0;
@@ -2007,14 +2194,14 @@ class CircuitSimulator {
     }
 
     const N = activeSwitches.length;
-    if (N > 8) {
+    if (N > 11) {
       return {
         inputs: activeSwitches,
         outputs: activeLeds,
         activeICs,
         rows: [],
         liveRowIndex: -1,
-        emptyReason: `Too many input switches connected (${N} switches). Truth table supports up to 8 inputs (256 combinations).`
+        emptyReason: `Circuit has ${N} input switches connected. Truth table supports up to 11 inputs (2,048 combinations). For larger circuits, test combinations live directly using the switches on the Trainer Kit.`
       };
     }
 
@@ -2811,8 +2998,185 @@ const LAB_PRESETS = [
       { from: { comp: 'icbase_0', pin: 8 }, to: { comp: 'led', pin: 2 }, color: '#ef4444' },
       { from: { comp: 'icbase_0', pin: 11 }, to: { comp: 'led', pin: 3 }, color: '#ef4444' }
     ]
+  },
+
+  {
+    id: 'mux_8to1',
+    title: '8:1 Multiplexer (74LS151)',
+    description: 'Data selector routing one of eight inputs (D0..D7) to complementary outputs Y and W# via select address C, B, A.',
+    switches: [1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0], // SW0..SW7 Data, SW8..SW10 Select (C, B, A)
+    icBases: [
+      { id: 0, icId: '74LS151' }
+    ],
+    wires: [
+      // Data inputs SW0..SW7 -> D0 (pin 4), D1 (pin 3), D2 (pin 2), D3 (pin 1), D4 (pin 15), D5 (pin 14), D6 (pin 13), D7 (pin 12)
+      { from: { comp: 'switch', pin: 0 }, to: { comp: 'icbase_0', pin: 4 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 1 }, to: { comp: 'icbase_0', pin: 3 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 2 }, to: { comp: 'icbase_0', pin: 2 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 3 }, to: { comp: 'icbase_0', pin: 1 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 4 }, to: { comp: 'icbase_0', pin: 15 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 5 }, to: { comp: 'icbase_0', pin: 14 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 6 }, to: { comp: 'icbase_0', pin: 13 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 7 }, to: { comp: 'icbase_0', pin: 12 }, color: '#38bdf8' },
+      // Select lines: SW8 -> A (pin 11), SW9 -> B (pin 10), SW10 -> C (pin 9)
+      { from: { comp: 'switch', pin: 8 }, to: { comp: 'icbase_0', pin: 11 }, color: '#f59e0b' },
+      { from: { comp: 'switch', pin: 9 }, to: { comp: 'icbase_0', pin: 10 }, color: '#f59e0b' },
+      { from: { comp: 'switch', pin: 10 }, to: { comp: 'icbase_0', pin: 9 }, color: '#f59e0b' },
+      // Strobe S# (pin 7) to GND
+      { from: { comp: 'gnd', pin: 0 }, to: { comp: 'icbase_0', pin: 7 }, color: '#000000' },
+      // Outputs: True Y (pin 5) -> LED0, Inverted W# (pin 6) -> LED1
+      { from: { comp: 'icbase_0', pin: 5 }, to: { comp: 'led', pin: 0 }, color: '#22c55e' },
+      { from: { comp: 'icbase_0', pin: 6 }, to: { comp: 'led', pin: 1 }, color: '#ef4444' }
+    ]
+  },
+
+  {
+    id: 'demux_3to8',
+    title: '3-to-8 Line Decoder / Demultiplexer (74LS138)',
+    description: 'Decodes a 3-bit binary address into 8 individual active-low outputs (Y0#..Y7#).',
+    switches: [0, 0, 0], // SW0(A), SW1(B), SW2(C)
+    icBases: [
+      { id: 0, icId: '74LS138' }
+    ],
+    wires: [
+      // Address inputs: SW0 -> A (pin 1), SW1 -> B (pin 2), SW2 -> C (pin 3)
+      { from: { comp: 'switch', pin: 0 }, to: { comp: 'icbase_0', pin: 1 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 1 }, to: { comp: 'icbase_0', pin: 2 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 2 }, to: { comp: 'icbase_0', pin: 3 }, color: '#38bdf8' },
+      // Enables: G1 (pin 6) -> VCC, G2A# (pin 4) -> GND, G2B# (pin 5) -> GND
+      { from: { comp: 'vcc', pin: 0 }, to: { comp: 'icbase_0', pin: 6 }, color: '#ef4444' },
+      { from: { comp: 'gnd', pin: 0 }, to: { comp: 'icbase_0', pin: 4 }, color: '#000000' },
+      { from: { comp: 'gnd', pin: 0 }, to: { comp: 'icbase_0', pin: 5 }, color: '#000000' },
+      // Outputs Y0#..Y7# -> LED0..LED7
+      { from: { comp: 'icbase_0', pin: 15 }, to: { comp: 'led', pin: 0 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 14 }, to: { comp: 'led', pin: 1 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 13 }, to: { comp: 'led', pin: 2 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 12 }, to: { comp: 'led', pin: 3 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 11 }, to: { comp: 'led', pin: 4 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 10 }, to: { comp: 'led', pin: 5 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 9 }, to: { comp: 'led', pin: 6 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 7 }, to: { comp: 'led', pin: 7 }, color: '#a855f7' }
+    ]
+  },
+
+  {
+    id: 'comparator_4bit',
+    title: '4-Bit Magnitude Comparator (74LS85)',
+    description: 'Compares two 4-bit binary words A (SW0..SW3) and B (SW4..SW7) with OA>B, OA=B, OA<B indicator outputs.',
+    switches: [1, 0, 1, 0, 0, 1, 1, 0], // A = 5 (0101), B = 6 (0110) -> A < B
+    icBases: [
+      { id: 0, icId: '74LS85' }
+    ],
+    wires: [
+      // Word A inputs: SW0 -> A0 (pin 10), SW1 -> A1 (pin 12), SW2 -> A2 (pin 13), SW3 -> A3 (pin 15)
+      { from: { comp: 'switch', pin: 0 }, to: { comp: 'icbase_0', pin: 10 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 1 }, to: { comp: 'icbase_0', pin: 12 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 2 }, to: { comp: 'icbase_0', pin: 13 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 3 }, to: { comp: 'icbase_0', pin: 15 }, color: '#38bdf8' },
+      // Word B inputs: SW4 -> B0 (pin 9), SW5 -> B1 (pin 11), SW6 -> B2 (pin 14), SW7 -> B3 (pin 1)
+      { from: { comp: 'switch', pin: 4 }, to: { comp: 'icbase_0', pin: 9 }, color: '#22c55e' },
+      { from: { comp: 'switch', pin: 5 }, to: { comp: 'icbase_0', pin: 11 }, color: '#22c55e' },
+      { from: { comp: 'switch', pin: 6 }, to: { comp: 'icbase_0', pin: 14 }, color: '#22c55e' },
+      { from: { comp: 'switch', pin: 7 }, to: { comp: 'icbase_0', pin: 1 }, color: '#22c55e' },
+      // Cascading inputs: IA=B (pin 3) -> VCC, IA>B (pin 4) -> GND, IA<B (pin 2) -> GND
+      { from: { comp: 'vcc', pin: 0 }, to: { comp: 'icbase_0', pin: 3 }, color: '#ef4444' },
+      { from: { comp: 'gnd', pin: 0 }, to: { comp: 'icbase_0', pin: 4 }, color: '#000000' },
+      { from: { comp: 'gnd', pin: 0 }, to: { comp: 'icbase_0', pin: 2 }, color: '#000000' },
+      // Outputs: OA>B (pin 5) -> LED0, OA=B (pin 6) -> LED1, OA<B (pin 7) -> LED2
+      { from: { comp: 'icbase_0', pin: 5 }, to: { comp: 'led', pin: 0 }, color: '#eab308' },
+      { from: { comp: 'icbase_0', pin: 6 }, to: { comp: 'led', pin: 1 }, color: '#22c55e' },
+      { from: { comp: 'icbase_0', pin: 7 }, to: { comp: 'led', pin: 2 }, color: '#ef4444' }
+    ]
+  },
+
+  {
+    id: 'half_subtractor',
+    title: 'Half Subtractor (74LS86 XOR + 74LS04 NOT + 74LS08 AND)',
+    description: 'Calculates Difference = A ⊕ B and Borrow = A\' · B for two 1-bit inputs.',
+    switches: [0, 0], // SW0 (A), SW1 (B)
+    icBases: [
+      { id: 0, icId: '74LS86' },
+      { id: 1, icId: '74LS04' },
+      { id: 2, icId: '74LS08' }
+    ],
+    wires: [
+      // SW0 (A) -> 74LS86 pin 1, 74LS04 pin 1
+      { from: { comp: 'switch', pin: 0 }, to: { comp: 'icbase_0', pin: 1 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 0 }, to: { comp: 'icbase_1', pin: 1 }, color: '#38bdf8' },
+      // SW1 (B) -> 74LS86 pin 2, 74LS08 pin 2
+      { from: { comp: 'switch', pin: 1 }, to: { comp: 'icbase_0', pin: 2 }, color: '#22c55e' },
+      { from: { comp: 'switch', pin: 1 }, to: { comp: 'icbase_2', pin: 2 }, color: '#22c55e' },
+      // Difference = 74LS86 pin 3 -> LED0
+      { from: { comp: 'icbase_0', pin: 3 }, to: { comp: 'led', pin: 0 }, color: '#22c55e' },
+      // 74LS04 pin 2 (A') -> 74LS08 pin 1
+      { from: { comp: 'icbase_1', pin: 2 }, to: { comp: 'icbase_2', pin: 1 }, color: '#f59e0b' },
+      // Borrow = 74LS08 pin 3 -> LED1
+      { from: { comp: 'icbase_2', pin: 3 }, to: { comp: 'led', pin: 1 }, color: '#ef4444' }
+    ]
+  },
+
+  {
+    id: 'priority_encoder_8to3',
+    title: '8-to-3 Priority Encoder (74LS148)',
+    description: 'Encodes 8 active-low inputs (0#..7#) into 3-bit binary code (A2#..A0#). Input 7# has the highest priority.',
+    switches: [1, 1, 1, 1, 1, 1, 1, 0], // Inputs 0#..7#: SW7 is 0 (Active), highest priority!
+    icBases: [
+      { id: 0, icId: '74LS148' }
+    ],
+    wires: [
+      // Enable Input EI# (pin 5) to GND (active)
+      { from: { comp: 'gnd', pin: 0 }, to: { comp: 'icbase_0', pin: 5 }, color: '#000000' },
+      // Inputs: SW0 -> 0# (pin 10), SW1 -> 1# (pin 11), SW2 -> 2# (pin 12), SW3 -> 3# (pin 13)
+      { from: { comp: 'switch', pin: 0 }, to: { comp: 'icbase_0', pin: 10 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 1 }, to: { comp: 'icbase_0', pin: 11 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 2 }, to: { comp: 'icbase_0', pin: 12 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 3 }, to: { comp: 'icbase_0', pin: 13 }, color: '#38bdf8' },
+      // Inputs: SW4 -> 4# (pin 1), SW5 -> 5# (pin 2), SW6 -> 6# (pin 3), SW7 -> 7# (pin 4)
+      { from: { comp: 'switch', pin: 4 }, to: { comp: 'icbase_0', pin: 1 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 5 }, to: { comp: 'icbase_0', pin: 2 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 6 }, to: { comp: 'icbase_0', pin: 3 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 7 }, to: { comp: 'icbase_0', pin: 4 }, color: '#38bdf8' },
+      // Address Outputs: A0# (pin 9) -> LED0, A1# (pin 7) -> LED1, A2# (pin 6) -> LED2
+      { from: { comp: 'icbase_0', pin: 9 }, to: { comp: 'led', pin: 0 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 7 }, to: { comp: 'led', pin: 1 }, color: '#a855f7' },
+      { from: { comp: 'icbase_0', pin: 6 }, to: { comp: 'led', pin: 2 }, color: '#a855f7' },
+      // Status Outputs: GS# (pin 14) -> LED3, EO# (pin 15) -> LED4
+      { from: { comp: 'icbase_0', pin: 14 }, to: { comp: 'led', pin: 3 }, color: '#ef4444' },
+      { from: { comp: 'icbase_0', pin: 15 }, to: { comp: 'led', pin: 4 }, color: '#eab308' }
+    ]
+  },
+
+  {
+    id: 'xnor_equality',
+    title: '2-Bit Equality Comparator (74LS266 XNOR + 74LS08 AND)',
+    description: 'Tests if two 2-bit numbers A (SW0, SW1) and B (SW2, SW3) are identical using XNOR equivalence gates combined by an AND gate.',
+    switches: [1, 0, 1, 0], // A = 01, B = 01 (Equal)
+    icBases: [
+      { id: 0, icId: '74LS266' },
+      { id: 1, icId: '74LS08' }
+    ],
+    wires: [
+      // Bit 0: SW0 (A0) -> 74LS266 pin 1, SW2 (B0) -> 74LS266 pin 2
+      { from: { comp: 'switch', pin: 0 }, to: { comp: 'icbase_0', pin: 1 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 2 }, to: { comp: 'icbase_0', pin: 2 }, color: '#22c55e' },
+      // Bit 1: SW1 (A1) -> 74LS266 pin 4, SW3 (B1) -> 74LS266 pin 5
+      { from: { comp: 'switch', pin: 1 }, to: { comp: 'icbase_0', pin: 4 }, color: '#38bdf8' },
+      { from: { comp: 'switch', pin: 3 }, to: { comp: 'icbase_0', pin: 5 }, color: '#22c55e' },
+      // XNOR outputs: 1Y (pin 3, A0==B0) and 2Y (pin 6, A1==B1) -> 74LS08 AND pins 1 & 2
+      { from: { comp: 'icbase_0', pin: 3 }, to: { comp: 'icbase_1', pin: 1 }, color: '#f59e0b' },
+      { from: { comp: 'icbase_0', pin: 6 }, to: { comp: 'icbase_1', pin: 2 }, color: '#f59e0b' },
+      // Bit match indicators: LED1 (Bit 0 match), LED2 (Bit 1 match)
+      { from: { comp: 'icbase_0', pin: 3 }, to: { comp: 'led', pin: 1 }, color: '#06b6d4' },
+      { from: { comp: 'icbase_0', pin: 6 }, to: { comp: 'led', pin: 2 }, color: '#06b6d4' },
+      // Total Equality output: 74LS08 pin 3 -> LED0
+      { from: { comp: 'icbase_1', pin: 3 }, to: { comp: 'led', pin: 0 }, color: '#22c55e' }
+    ]
   }
 ];
+
+if (typeof window !== 'undefined') {
+  window.LAB_PRESETS = LAB_PRESETS;
+}
 
 // ==========================================
 // SOURCE: js/datasheet.js
@@ -4759,20 +5123,54 @@ class DigitalLogicSuite {
     const newMinterms = new Set();
     const newDontCares = new Set();
 
-    circuitData.rows.forEach(r => {
-      if (r.rowIndex < (1 << this.varsCount)) {
-        const outVal = r.outputs[primaryLed];
-        if (outVal === 1) {
-          newMinterms.add(r.rowIndex);
-        } else if (outVal === 'X') {
-          newDontCares.add(r.rowIndex);
+    if (circuitData.rows && circuitData.rows.length > 0) {
+      const kmapSwitches = circuitData.inputs.slice(0, this.varsCount);
+      const otherSwitches = circuitData.inputs.slice(this.varsCount);
+      const liveRow = circuitData.liveRowIndex >= 0 ? circuitData.rows[circuitData.liveRowIndex] : circuitData.rows[0];
+
+      // For each cell in the K-Map (0 .. 2^varsCount - 1)
+      const numCells = 1 << this.varsCount;
+      for (let m = 0; m < numCells; m++) {
+        // Find row in circuitData matching combination m on kmapSwitches and live state on otherSwitches
+        const matchRow = circuitData.rows.find(r => {
+          for (let bit = 0; bit < this.varsCount; bit++) {
+            const shift = this.varsCount - 1 - bit;
+            const expectedBit = (m >> shift) & 1;
+            const sw = kmapSwitches[bit];
+            if (r.inputs[sw] !== expectedBit) return false;
+          }
+          if (otherSwitches.length > 0 && liveRow) {
+            for (let i = 0; i < otherSwitches.length; i++) {
+              const sw = otherSwitches[i];
+              if (r.inputs[sw] !== liveRow.inputs[sw]) return false;
+            }
+          }
+          return true;
+        });
+
+        if (matchRow) {
+          const outVal = matchRow.outputs[primaryLed];
+          if (outVal === 1) newMinterms.add(m);
+          else if (outVal === 'X') newDontCares.add(m);
         }
       }
-    });
+
+      // Calculate live row index within K-Map
+      if (liveRow) {
+        let liveM = 0;
+        for (let bit = 0; bit < this.varsCount; bit++) {
+          const sw = kmapSwitches[bit];
+          const b = liveRow.inputs[sw] || 0;
+          liveM = (liveM << 1) | b;
+        }
+        this.liveRowIndex = liveM;
+      } else {
+        this.liveRowIndex = -1;
+      }
+    }
 
     this.minterms = newMinterms;
     this.dontCares = newDontCares;
-    this.liveRowIndex = circuitData.liveRowIndex;
   }
 
   // ==========================================
@@ -5116,7 +5514,130 @@ class DigitalLogicSuite {
     };
   }
 
-  generateAlgebraicProof(numVars = this.varsCount, minterms = this.minterms, dontCares = this.dontCares) {
+  generateAlgebraicProof(numVars = this.varsCount, minterms = this.minterms, dontCares = this.dontCares, preset = 'current') {
+    if (preset === 'consensus') {
+      return [
+        {
+          step: 1,
+          law: 'Initial Boolean Expression',
+          expr: "F = AB + A'C + BC",
+          note: "Given 3-variable sum-of-products expression containing candidate redundant consensus term BC."
+        },
+        {
+          step: 2,
+          law: 'Identity Law (X · 1 = X)',
+          expr: "F = AB + A'C + BC · (1)",
+          note: "Introduce the multiplicative identity 1 to term BC without altering logical validity."
+        },
+        {
+          step: 3,
+          law: "Complement Law (A + A' = 1)",
+          expr: "F = AB + A'C + BC(A + A')",
+          note: "Substitute (A + A') for 1 using the missing third variable A."
+        },
+        {
+          step: 4,
+          law: 'Distributive Law: X(Y + Z) = XY + XZ',
+          expr: "F = AB + A'C + ABC + A'BC",
+          note: "Distribute conjunction BC across the sum of literals (A + A')."
+        },
+        {
+          step: 5,
+          law: 'Commutative & Associative Grouping',
+          expr: "F = (AB + ABC) + (A'C + A'BC)",
+          note: "Regroup product terms sharing common factors AB and A'C."
+        },
+        {
+          step: 6,
+          law: 'Distributive Factoring: XY + XZ = X(Y + Z)',
+          expr: "F = AB(1 + C) + A'C(1 + B)",
+          note: "Factor out common subterms AB and A'C."
+        },
+        {
+          step: 7,
+          law: 'Annihilation / Boundedness (1 + X = 1)',
+          expr: "F = AB(1) + A'C(1)",
+          note: "Any Boolean literal or term ORed with logic 1 evaluates identically to logic 1."
+        },
+        {
+          step: 8,
+          law: 'Identity Law (Consensus Theorem Q.E.D.)',
+          expr: "F = AB + A'C",
+          note: "The consensus term BC is completely redundant and safely eliminated. Minimal SOP verified."
+        }
+      ];
+    }
+
+    if (preset === 'absorption') {
+      return [
+        {
+          step: 1,
+          law: 'Initial Boolean Expression',
+          expr: 'F = A + AB',
+          note: 'A primary variable A disjuncted with a narrower product term AB.'
+        },
+        {
+          step: 2,
+          law: 'Identity Law (A · 1 = A)',
+          expr: 'F = A · (1) + AB',
+          note: 'Represent single literal A as product with logic 1 identity.'
+        },
+        {
+          step: 3,
+          law: 'Distributive Factoring: AX + AY = A(X + Y)',
+          expr: 'F = A(1 + B)',
+          note: 'Factor common literal A out of both terms.'
+        },
+        {
+          step: 4,
+          law: 'Annihilation / Boundedness (1 + B = 1)',
+          expr: 'F = A · (1)',
+          note: 'Since 1 + B = 1 regardless of whether B is 0 or 1.'
+        },
+        {
+          step: 5,
+          law: 'Identity Law (Absorption Law Q.E.D.)',
+          expr: 'F = A',
+          note: 'Term AB is completely absorbed into A. Minimal expression is single literal A.'
+        }
+      ];
+    }
+
+    if (preset === 'demorgan') {
+      return [
+        {
+          step: 1,
+          law: 'Initial Boolean Expression',
+          expr: "F = (A + B)'",
+          note: 'Negation / complement of a logical OR (NOR function).'
+        },
+        {
+          step: 2,
+          law: "De Morgan's Theorem (NOR Dual)",
+          expr: "F = A' · B'",
+          note: "The complement of a disjunction equals the conjunction of the individual complements: (A + B)' = A'B'."
+        },
+        {
+          step: 3,
+          law: "Complement Check 1 (X + X' = 1)",
+          expr: "(A + B) + (A'B') = (A + B + A')(A + B + B') = (1 + B)(A + 1) = 1 · 1 = 1",
+          note: "Verify algebraic complement condition: F + F' must identically equal 1."
+        },
+        {
+          step: 4,
+          law: "Complement Check 2 (X · X' = 0)",
+          expr: "(A + B) · (A'B') = A · A'B' + B · A'B' = 0 + 0 = 0",
+          note: "Verify orthogonality condition: F · F' must identically equal 0."
+        },
+        {
+          step: 5,
+          law: 'Minimal SOP Result',
+          expr: "F = A'B'",
+          note: "De Morgan duality verified. Implemented with a single 2-input AND gate with inverted inputs."
+        }
+      ];
+    }
+
     const qm = this.solveQuineMcCluskey(numVars, minterms, dontCares);
     const steps = [];
 
@@ -5128,11 +5649,12 @@ class DigitalLogicSuite {
 
     if (mintermTerms.length === 0) {
       return [
-        { law: 'Null / Annihilation Law', expr: 'F = 0', note: 'No active minterms. Output is permanently LOW (GND).' }
+        { step: 1, law: 'Null / Annihilation Law', expr: 'F = 0', note: 'No active minterms. Output is permanently LOW (GND).' }
       ];
     }
 
     steps.push({
+      step: 1,
       law: 'Canonical Sum-of-Minterms (SOP Expansion)',
       expr: 'F = ' + (mintermTerms.join(' + ') || '0'),
       note: 'Represent each active truth-table 1-cell as an AND-product of input literals.'
@@ -5140,6 +5662,7 @@ class DigitalLogicSuite {
 
     if (mintermTerms.length > 1) {
       steps.push({
+        step: 2,
         law: "Adjacency Theorem & Distribution: XY + XY' = X(Y + Y')",
         expr: 'F = ' + (qm.terms.map(t => `(${t.term})`).join(' + ') || qm.sop),
         note: 'Factor common literals between Gray-code adjacent terms differing by exactly one negated variable.'
@@ -5147,12 +5670,14 @@ class DigitalLogicSuite {
     }
 
     steps.push({
+      step: steps.length + 1,
       law: "Complement & Identity Laws: (Y + Y' = 1, X · 1 = X)",
       expr: 'F = ' + (qm.sop || '0'),
       note: 'Complementary pairs annihilate to logic 1; remaining essential literals form minimal terms.'
     });
 
     steps.push({
+      step: steps.length + 1,
       law: 'Quine-McCluskey & Consensus Verification',
       expr: 'F(minimized) = ' + (qm.sop || '0'),
       note: `Verified irredundant minimal SOP via prime implicant coverage (${qm.essentialPIs.length} essential group${qm.essentialPIs.length === 1 ? '' : 's'}).`
@@ -6718,14 +7243,112 @@ class DeldApp {
     const mountedBase = this.sim.icBases.find(b => b.icId === icId);
     let activeRowIndex = -1;
 
-    if (mountedBase && this.sim.power) {
-      if (headers.length >= 3 && (headers[0] === 'A' || headers[0] === '1A') && (headers[1] === 'B' || headers[1] === '1B')) {
-        const inA = mountedBase.pins[1] ? mountedBase.pins[1].level : 0;
-        const inB = mountedBase.pins[2] ? mountedBase.pins[2].level : 0;
+    if (mountedBase && this.sim.power && mountedBase.pins) {
+      const getPin = (p) => mountedBase.pins[p] ? (mountedBase.pins[p].level || 0) : 0;
+
+      if (['74LS00', '74LS08', '74LS32', '74LS86', '74LS266'].includes(icId)) {
+        // Gate 1: Pin 1 (1A), Pin 2 (1B)
+        const inA = getPin(1);
+        const inB = getPin(2);
         activeRowIndex = rows.findIndex(r => String(r[0]) === String(inA) && String(r[1]) === String(inB));
-      } else if (headers.length >= 2 && (headers[0] === 'A' || headers[0] === '1A')) {
-        const inA = mountedBase.pins[1] ? mountedBase.pins[1].level : 0;
+      } else if (icId === '74LS02') {
+        // 74LS02 NOR: Gate 1 Inputs are Pin 2 (1A) and Pin 3 (1B)
+        const inA = getPin(2);
+        const inB = getPin(3);
+        activeRowIndex = rows.findIndex(r => String(r[0]) === String(inA) && String(r[1]) === String(inB));
+      } else if (icId === '74LS04' || icId === '74LS14') {
+        // Inverter: Pin 1 (1A)
+        const inA = getPin(1);
         activeRowIndex = rows.findIndex(r => String(r[0]) === String(inA));
+      } else if (icId === '74LS10' || icId === '74LS11' || icId === '74LS27') {
+        // 3-input gates: Gate 1 pins 1, 2, 13
+        const inA = getPin(1);
+        const inB = getPin(2);
+        const inC = getPin(13);
+        activeRowIndex = rows.findIndex(r => String(r[0]) === String(inA) && String(r[1]) === String(inB) && String(r[2]) === String(inC));
+      } else if (icId === '74LS20' || icId === '74LS21') {
+        const allOnes = getPin(1) === 1 && getPin(2) === 1 && getPin(4) === 1 && getPin(5) === 1;
+        activeRowIndex = allOnes ? 0 : 1;
+      } else if (icId === '74LS30') {
+        const allOnes = [1, 2, 3, 4, 5, 6, 11, 12].every(p => getPin(p) === 1);
+        activeRowIndex = allOnes ? 0 : 1;
+      } else if (icId === '74LS85') {
+        // 4-bit Magnitude Comparator
+        const a = (getPin(15) << 3) | (getPin(13) << 2) | (getPin(12) << 1) | getPin(10);
+        const b = (getPin(1) << 3) | (getPin(14) << 2) | (getPin(11) << 1) | getPin(9);
+        if (a > b) activeRowIndex = 0;
+        else if (a < b) activeRowIndex = 1;
+        else activeRowIndex = 2;
+      } else if (icId === '74LS151') {
+        // 8:1 MUX: Pin 7 (S#), Pins 9(C), 10(B), 11(A)
+        const s = getPin(7);
+        if (s === 1) {
+          activeRowIndex = 0;
+        } else {
+          const sel = (getPin(9) << 2) | (getPin(10) << 1) | getPin(11);
+          activeRowIndex = Math.min(rows.length - 1, sel + 1);
+        }
+      } else if (icId === '74LS153') {
+        // Dual 4:1 MUX: Pin 1 (1G#), Pins 2(B), 14(A)
+        const g1 = getPin(1);
+        if (g1 === 1) {
+          activeRowIndex = 0;
+        } else {
+          const sel = (getPin(2) << 1) | getPin(14);
+          activeRowIndex = Math.min(rows.length - 1, sel + 1);
+        }
+      } else if (icId === '74LS157') {
+        // Quad 2:1 MUX: Pin 15 (STROBE#), Pin 1 (SELECT)
+        const strobe = getPin(15);
+        if (strobe === 1) {
+          activeRowIndex = 0;
+        } else {
+          activeRowIndex = getPin(1) === 0 ? 1 : 2;
+        }
+      } else if (icId === '74LS138') {
+        // 3:8 Decoder: G1 (pin 6), G2A# (pin 4), G2B# (pin 5)
+        const en = getPin(6) === 1 && getPin(4) === 0 && getPin(5) === 0;
+        if (!en) {
+          activeRowIndex = 0;
+        } else {
+          const sel = (getPin(3) << 2) | (getPin(2) << 1) | getPin(1);
+          activeRowIndex = Math.min(rows.length - 1, sel + 1);
+        }
+      } else if (icId === '74LS148') {
+        // 8:3 Priority Encoder: Pin 5 (EI#), Inputs 4#(1), 5#(2), 6#(3), 7#(4), 0#(10), 1#(11), 2#(12), 3#(13)
+        const ei = getPin(5);
+        if (ei === 1) {
+          activeRowIndex = 0;
+        } else {
+          const priorityPins = [
+            { row: 2, pin: 4 },  // 7#
+            { row: 3, pin: 3 },  // 6#
+            { row: 4, pin: 2 },  // 5#
+            { row: 5, pin: 1 },  // 4#
+            { row: 6, pin: 13 }, // 3#
+            { row: 7, pin: 12 }, // 2#
+            { row: 8, pin: 11 }, // 1#
+            { row: 9, pin: 10 }  // 0#
+          ];
+          const match = priorityPins.find(p => getPin(p.pin) === 0);
+          activeRowIndex = match ? match.row : 1;
+        }
+      } else if (icId === '74LS74') {
+        // Dual D FF
+        const pre = getPin(4);
+        const clr = getPin(1);
+        if (pre === 0 && clr === 1) activeRowIndex = 0;
+        else if (pre === 1 && clr === 0) activeRowIndex = 1;
+        else if (pre === 0 && clr === 0) activeRowIndex = 2;
+        else activeRowIndex = 3;
+      } else {
+        // Generic fallback: check first 1 or 2 pins
+        const inPins = Object.entries(ic.pinout || {}).filter(([p, inf]) => inf.type === 'input').map(([p]) => Number(p));
+        if (inPins.length >= 2) {
+          const v0 = getPin(inPins[0]);
+          const v1 = getPin(inPins[1]);
+          activeRowIndex = rows.findIndex(r => (String(r[0]) === String(v0) || r[0] === 'X') && (String(r[1]) === String(v1) || r[1] === 'X'));
+        }
       }
     }
 
@@ -7253,18 +7876,26 @@ class DeldApp {
       modal.querySelectorAll('.algebraic-preset-btn[data-preset]').forEach(btn => {
         btn.addEventListener('click', () => {
           const preset = btn.getAttribute('data-preset');
+          this.currentAlgebraicPreset = preset;
           if (preset === 'consensus') {
             this.suite.setVarsCount(3);
             this.suite.minterms = new Set([3, 5, 6, 7]); // AB + A'C + BC
+            this.suite.dontCares = new Set([]);
           } else if (preset === 'absorption') {
             this.suite.setVarsCount(2);
             this.suite.minterms = new Set([2, 3]); // A + AB = A
+            this.suite.dontCares = new Set([]);
           } else if (preset === 'demorgan') {
             this.suite.setVarsCount(2);
             this.suite.minterms = new Set([0]); // (A+B)' = A'B'
+            this.suite.dontCares = new Set([]);
+          } else if (preset === 'current') {
+            if (this.suite.liveSync) {
+              this.updateLogicSuiteLive();
+            }
           }
           this.renderKMapTab();
-          this.renderSimplifierTab();
+          this.renderSimplifierTab(preset);
         });
       });
 
@@ -7736,6 +8367,247 @@ class DeldApp {
       this.showToast(`Set kit switches to row m${rowIndex}!`, 'success');
       this.updateLogicSuiteLive();
     }
+  }
+
+  // --- ALGEBRAIC SIMPLIFIER TAB RENDERER ---
+  renderSimplifierTab(preset = null) {
+    const container = document.getElementById('suiteAlgebraicStepsContainer');
+    if (!container) return;
+
+    if (preset) {
+      this.currentAlgebraicPreset = preset;
+    } else if (!this.currentAlgebraicPreset) {
+      this.currentAlgebraicPreset = 'current';
+    }
+
+    // Update active preset button style
+    const modal = document.getElementById('logic-suite-modal');
+    if (modal) {
+      modal.querySelectorAll('.algebraic-preset-btn').forEach(btn => {
+        const p = btn.getAttribute('data-preset');
+        if (p === this.currentAlgebraicPreset) {
+          btn.className = 'algebraic-preset-btn active px-3 py-1.5 rounded-lg bg-purple-600 text-white font-bold text-xs shadow-xs';
+        } else {
+          btn.className = 'algebraic-preset-btn px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700';
+        }
+      });
+    }
+
+    const steps = this.suite.generateAlgebraicProof(
+      this.suite.varsCount,
+      this.suite.minterms,
+      this.suite.dontCares,
+      this.currentAlgebraicPreset
+    );
+
+    let html = '';
+    steps.forEach((step, idx) => {
+      const stepNum = step.step || (idx + 1);
+      const isFinal = idx === steps.length - 1;
+      const borderClass = isFinal ? 'border-2 border-purple-500 bg-purple-50/40' : 'border border-slate-200 bg-white';
+      const badgeClass = isFinal ? 'bg-purple-600 text-white font-black' : 'bg-purple-100 text-purple-800 font-bold';
+
+      html += `
+        <div class="p-4 rounded-xl ${borderClass} shadow-xs space-y-2 transition-all hover:shadow-md">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded text-[10px] ${badgeClass}">STEP ${stepNum}</span>
+              <span class="text-xs font-bold text-slate-800">${step.law}</span>
+            </div>
+            ${isFinal ? '<span class="text-[10px] font-extrabold text-purple-600 uppercase tracking-wider bg-purple-100 px-2.5 py-0.5 rounded-full border border-purple-300">★ Simplified Irredundant SOP</span>' : ''}
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-900 text-purple-300 font-mono text-sm font-extrabold tracking-wide overflow-x-auto select-all shadow-inner">
+            ${step.expr}
+          </div>
+          <p class="text-xs text-slate-600 leading-relaxed">${step.note}</p>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  }
+
+  // --- CIRCUIT DIAGRAM TAB RENDERER ---
+  renderCircuitTab() {
+    const origBadge = document.getElementById('circuitOrigGatesBadge');
+    const minBadge = document.getElementById('circuitMinGatesBadge');
+    const origContainer = document.getElementById('circuitOrigSvgContainer');
+    const minContainer = document.getElementById('circuitMinSvgContainer');
+    if (!origContainer || !minContainer) return;
+
+    const spec = this.suite.getCircuitSchematicSpec();
+    const qm = this.suite.solveQuineMcCluskey();
+
+    if (origBadge) {
+      origBadge.textContent = `${spec.original.totalGates} Gates (${spec.original.inverters} NOT, ${spec.original.andGates} AND, ${spec.original.orGates} OR)`;
+    }
+    if (minBadge) {
+      minBadge.textContent = `${spec.minimized.totalGates} Gates (${spec.minimized.reductionPercent}% reduction)`;
+    }
+
+    const vars = this.suite.varNames.slice(0, this.suite.varsCount);
+    const origTerms = Array.from(this.suite.minterms).sort((a,b) => a-b).map(m => {
+      const bin = m.toString(2).padStart(this.suite.varsCount, '0');
+      return bin.split('').map((b, idx) => b === '1' ? vars[idx] : vars[idx] + "'").join('');
+    });
+
+    const minTerms = qm.terms.map(t => t.term);
+
+    origContainer.innerHTML = this.renderSchematicSVG(vars, origTerms, 'Original Canonical SOP', false);
+    minContainer.innerHTML = this.renderSchematicSVG(vars, minTerms, 'Minimized Irredundant Schematic', true);
+  }
+
+  /**
+   * Generates a clean, crisp logic gate schematic SVG.
+   */
+  renderSchematicSVG(vars, terms, title, isMinimized = false) {
+    const W = 520;
+    const H = 260;
+    const themeColor = isMinimized ? '#10b981' : '#0284c7';
+    const gateFill = isMinimized ? '#ecfdf5' : '#f0f9ff';
+    const gateStroke = isMinimized ? '#059669' : '#0284c7';
+
+    if (!terms || terms.length === 0) {
+      return `
+        <svg viewBox="0 0 ${W} ${H}" class="w-full h-full select-none" style="min-height: 240px;">
+          <rect width="${W}" height="${H}" rx="12" fill="#0b1329"/>
+          <text x="${W/2}" y="${H/2 - 10}" text-anchor="middle" fill="#64748b" font-family="monospace" font-size="14" font-weight="bold">No Active Minterms (Output F = 0)</text>
+          <path d="M ${W/2 - 40} ${H/2 + 20} H ${W/2 + 40}" stroke="#ef4444" stroke-width="2"/>
+          <path d="M ${W/2 - 25} ${H/2 + 26} H ${W/2 + 25}" stroke="#ef4444" stroke-width="2"/>
+          <path d="M ${W/2 - 10} ${H/2 + 32} H ${W/2 + 10}" stroke="#ef4444" stroke-width="2"/>
+          <text x="${W/2}" y="${H/2 + 50}" text-anchor="middle" fill="#ef4444" font-family="monospace" font-size="11" font-weight="bold">GND (LOW)</text>
+        </svg>
+      `;
+    }
+
+    const varColors = {
+      'A': '#38bdf8',
+      'B': '#34d399',
+      'C': '#a78bfa',
+      'D': '#fb923c'
+    };
+
+    const numTerms = terms.length;
+    const midY = H / 2;
+    const termSpacing = Math.min(55, Math.max(34, 180 / (numTerms || 1)));
+    const startY = midY - ((numTerms - 1) * termSpacing) / 2;
+
+    const xRailsStart = 30;
+    const railPitch = 16;
+    const xAndGates = 190;
+    const xOrGate = 400;
+    const xOut = 495;
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" class="w-full h-full select-none" style="min-height: 240px;">`;
+    svg += `<rect width="${W}" height="${H}" rx="12" fill="#0b1329"/>`;
+    svg += `<text x="16" y="22" fill="#94a3b8" font-family="monospace" font-size="10" font-weight="bold">${title} • ${numTerms} Term${numTerms === 1 ? '' : 's'}</text>`;
+
+    const railXMap = {};
+    vars.forEach((v, vIdx) => {
+      const xTrue = xRailsStart + vIdx * railPitch * 2;
+      const xComp = xTrue + railPitch;
+      railXMap[v] = xTrue;
+      railXMap[v + "'"] = xComp;
+
+      const col = varColors[v] || '#94a3b8';
+
+      // True Rail
+      svg += `<line x1="${xTrue}" y1="36" x2="${xTrue}" y2="${H - 20}" stroke="${col}" stroke-width="1.5" stroke-opacity="0.8"/>`;
+      svg += `<circle cx="${xTrue}" cy="36" r="3" fill="${col}"/>`;
+      svg += `<text x="${xTrue}" y="32" fill="${col}" font-family="monospace" font-size="10" font-weight="extrabold" text-anchor="middle">${v}</text>`;
+
+      // Inverter for Complemented Rail
+      svg += `<line x1="${xTrue}" y1="52" x2="${xComp}" y2="52" stroke="${col}" stroke-width="1.5" stroke-opacity="0.7"/>`;
+      svg += `<circle cx="${xTrue}" cy="52" r="2" fill="${col}"/>`;
+      svg += `<polygon points="${xComp-8},48 ${xComp},52 ${xComp-8},56" fill="#1e293b" stroke="#64748b" stroke-width="1"/>`;
+      svg += `<circle cx="${xComp+2}" cy="52" r="2" fill="#1e293b" stroke="#64748b" stroke-width="1"/>`;
+      svg += `<line x1="${xComp}" y1="54" x2="${xComp}" y2="${H - 20}" stroke="${col}" stroke-width="1.5" stroke-dasharray="3,2" stroke-opacity="0.7"/>`;
+      svg += `<text x="${xComp}" y="42" fill="#64748b" font-family="monospace" font-size="8" font-weight="bold" text-anchor="middle">${v}'</text>`;
+    });
+
+    const andOutputs = [];
+
+    terms.forEach((term, tIdx) => {
+      const yTerm = startY + tIdx * termSpacing;
+
+      const lits = [];
+      for (let i = 0; i < term.length; i++) {
+        if (vars.includes(term[i])) {
+          let lit = term[i];
+          if (term[i + 1] === "'") {
+            lit += "'";
+            i++;
+          }
+          lits.push(lit);
+        }
+      }
+
+      if (lits.length === 1 && numTerms === 1) {
+        const rx = railXMap[lits[0]] || xRailsStart;
+        svg += `<line x1="${rx}" y1="${yTerm}" x2="${xOut}" y2="${yTerm}" stroke="${themeColor}" stroke-width="2"/>`;
+        svg += `<circle cx="${rx}" cy="${yTerm}" r="3" fill="${themeColor}"/>`;
+        andOutputs.push({ x: xOut, y: yTerm });
+      } else {
+        const andW = 32;
+        const andH = 26;
+        const gX = xAndGates;
+        const gY = yTerm - andH / 2;
+
+        const inY1 = yTerm - 6;
+        const inY2 = yTerm + 6;
+        const inYs = lits.length <= 1 ? [yTerm] : [inY1, inY2];
+
+        lits.forEach((lit, lIdx) => {
+          const rx = railXMap[lit];
+          const targetY = inYs[lIdx % inYs.length];
+          if (rx) {
+            const col = varColors[lit.replace("'", '')] || '#94a3b8';
+            svg += `<circle cx="${rx}" cy="${targetY}" r="2.5" fill="${col}"/>`;
+            svg += `<line x1="${rx}" y1="${targetY}" x2="${gX}" y2="${targetY}" stroke="${col}" stroke-width="1.5"/>`;
+          }
+        });
+
+        svg += `
+          <path d="M ${gX} ${gY} h 16 a 13 13 0 0 1 13 13 a 13 13 0 0 1 -13 13 h -16 z"
+                fill="${gateFill}" fill-opacity="0.15" stroke="${gateStroke}" stroke-width="2"/>
+          <text x="${gX + 13}" y="${yTerm + 3}" fill="#cbd5e1" font-family="monospace" font-size="8" font-weight="bold" text-anchor="middle">${term}</text>
+        `;
+
+        const outX = gX + 29;
+        andOutputs.push({ x: outX, y: yTerm });
+      }
+    });
+
+    if (numTerms > 1) {
+      const orW = 38;
+      const orH = Math.max(38, Math.min(100, numTerms * 20));
+      const orX = xOrGate;
+      const orY = midY - orH / 2;
+
+      andOutputs.forEach((pt, pIdx) => {
+        const orInY = midY - ((numTerms - 1) * 10) / 2 + pIdx * 10;
+        svg += `<path d="M ${pt.x} ${pt.y} H ${orX - 12} L ${orX + 4} ${orInY}" fill="none" stroke="${themeColor}" stroke-width="1.8"/>`;
+      });
+
+      svg += `
+        <path d="M ${orX} ${orY} q 12 ${orH/2} 0 ${orH} q 24 0 38 -${orH/2} q -14 -${orH/2} -38 -${orH/2} z"
+              fill="${gateFill}" fill-opacity="0.2" stroke="${gateStroke}" stroke-width="2.2"/>
+        <text x="${orX + 16}" y="${midY + 4}" fill="#ffffff" font-family="monospace" font-size="10" font-weight="extrabold" text-anchor="middle">OR</text>
+      `;
+
+      const finalOutX = orX + 38;
+      svg += `<line x1="${finalOutX}" y1="${midY}" x2="${xOut}" y2="${midY}" stroke="${themeColor}" stroke-width="2.5"/>`;
+      svg += `<circle cx="${xOut}" cy="${midY}" r="4" fill="${themeColor}"/>`;
+      svg += `<text x="${xOut + 8}" y="${midY + 4}" fill="#22c55e" font-family="monospace" font-size="12" font-weight="extrabold">F (OUT)</text>`;
+    } else if (numTerms === 1 && andOutputs.length > 0) {
+      const pt = andOutputs[0];
+      svg += `<line x1="${pt.x}" y1="${pt.y}" x2="${xOut}" y2="${pt.y}" stroke="${themeColor}" stroke-width="2.5"/>`;
+      svg += `<circle cx="${xOut}" cy="${pt.y}" r="4" fill="${themeColor}"/>`;
+      svg += `<text x="${xOut + 8}" y="${pt.y + 4}" fill="#22c55e" font-family="monospace" font-size="12" font-weight="extrabold">F (OUT)</text>`;
+    }
+
+    svg += `</svg>`;
+    return svg;
   }
 
   // --- COUNTER DESIGNER TAB RENDERER (LIVE) ---

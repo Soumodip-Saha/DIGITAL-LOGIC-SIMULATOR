@@ -52,20 +52,54 @@ export class DigitalLogicSuite {
     const newMinterms = new Set();
     const newDontCares = new Set();
 
-    circuitData.rows.forEach(r => {
-      if (r.rowIndex < (1 << this.varsCount)) {
-        const outVal = r.outputs[primaryLed];
-        if (outVal === 1) {
-          newMinterms.add(r.rowIndex);
-        } else if (outVal === 'X') {
-          newDontCares.add(r.rowIndex);
+    if (circuitData.rows && circuitData.rows.length > 0) {
+      const kmapSwitches = circuitData.inputs.slice(0, this.varsCount);
+      const otherSwitches = circuitData.inputs.slice(this.varsCount);
+      const liveRow = circuitData.liveRowIndex >= 0 ? circuitData.rows[circuitData.liveRowIndex] : circuitData.rows[0];
+
+      // For each cell in the K-Map (0 .. 2^varsCount - 1)
+      const numCells = 1 << this.varsCount;
+      for (let m = 0; m < numCells; m++) {
+        // Find row in circuitData matching combination m on kmapSwitches and live state on otherSwitches
+        const matchRow = circuitData.rows.find(r => {
+          for (let bit = 0; bit < this.varsCount; bit++) {
+            const shift = this.varsCount - 1 - bit;
+            const expectedBit = (m >> shift) & 1;
+            const sw = kmapSwitches[bit];
+            if (r.inputs[sw] !== expectedBit) return false;
+          }
+          if (otherSwitches.length > 0 && liveRow) {
+            for (let i = 0; i < otherSwitches.length; i++) {
+              const sw = otherSwitches[i];
+              if (r.inputs[sw] !== liveRow.inputs[sw]) return false;
+            }
+          }
+          return true;
+        });
+
+        if (matchRow) {
+          const outVal = matchRow.outputs[primaryLed];
+          if (outVal === 1) newMinterms.add(m);
+          else if (outVal === 'X') newDontCares.add(m);
         }
       }
-    });
+
+      // Calculate live row index within K-Map
+      if (liveRow) {
+        let liveM = 0;
+        for (let bit = 0; bit < this.varsCount; bit++) {
+          const sw = kmapSwitches[bit];
+          const b = liveRow.inputs[sw] || 0;
+          liveM = (liveM << 1) | b;
+        }
+        this.liveRowIndex = liveM;
+      } else {
+        this.liveRowIndex = -1;
+      }
+    }
 
     this.minterms = newMinterms;
     this.dontCares = newDontCares;
-    this.liveRowIndex = circuitData.liveRowIndex;
   }
 
   // ==========================================
@@ -409,7 +443,130 @@ export class DigitalLogicSuite {
     };
   }
 
-  generateAlgebraicProof(numVars = this.varsCount, minterms = this.minterms, dontCares = this.dontCares) {
+  generateAlgebraicProof(numVars = this.varsCount, minterms = this.minterms, dontCares = this.dontCares, preset = 'current') {
+    if (preset === 'consensus') {
+      return [
+        {
+          step: 1,
+          law: 'Initial Boolean Expression',
+          expr: "F = AB + A'C + BC",
+          note: "Given 3-variable sum-of-products expression containing candidate redundant consensus term BC."
+        },
+        {
+          step: 2,
+          law: 'Identity Law (X · 1 = X)',
+          expr: "F = AB + A'C + BC · (1)",
+          note: "Introduce the multiplicative identity 1 to term BC without altering logical validity."
+        },
+        {
+          step: 3,
+          law: "Complement Law (A + A' = 1)",
+          expr: "F = AB + A'C + BC(A + A')",
+          note: "Substitute (A + A') for 1 using the missing third variable A."
+        },
+        {
+          step: 4,
+          law: 'Distributive Law: X(Y + Z) = XY + XZ',
+          expr: "F = AB + A'C + ABC + A'BC",
+          note: "Distribute conjunction BC across the sum of literals (A + A')."
+        },
+        {
+          step: 5,
+          law: 'Commutative & Associative Grouping',
+          expr: "F = (AB + ABC) + (A'C + A'BC)",
+          note: "Regroup product terms sharing common factors AB and A'C."
+        },
+        {
+          step: 6,
+          law: 'Distributive Factoring: XY + XZ = X(Y + Z)',
+          expr: "F = AB(1 + C) + A'C(1 + B)",
+          note: "Factor out common subterms AB and A'C."
+        },
+        {
+          step: 7,
+          law: 'Annihilation / Boundedness (1 + X = 1)',
+          expr: "F = AB(1) + A'C(1)",
+          note: "Any Boolean literal or term ORed with logic 1 evaluates identically to logic 1."
+        },
+        {
+          step: 8,
+          law: 'Identity Law (Consensus Theorem Q.E.D.)',
+          expr: "F = AB + A'C",
+          note: "The consensus term BC is completely redundant and safely eliminated. Minimal SOP verified."
+        }
+      ];
+    }
+
+    if (preset === 'absorption') {
+      return [
+        {
+          step: 1,
+          law: 'Initial Boolean Expression',
+          expr: 'F = A + AB',
+          note: 'A primary variable A disjuncted with a narrower product term AB.'
+        },
+        {
+          step: 2,
+          law: 'Identity Law (A · 1 = A)',
+          expr: 'F = A · (1) + AB',
+          note: 'Represent single literal A as product with logic 1 identity.'
+        },
+        {
+          step: 3,
+          law: 'Distributive Factoring: AX + AY = A(X + Y)',
+          expr: 'F = A(1 + B)',
+          note: 'Factor common literal A out of both terms.'
+        },
+        {
+          step: 4,
+          law: 'Annihilation / Boundedness (1 + B = 1)',
+          expr: 'F = A · (1)',
+          note: 'Since 1 + B = 1 regardless of whether B is 0 or 1.'
+        },
+        {
+          step: 5,
+          law: 'Identity Law (Absorption Law Q.E.D.)',
+          expr: 'F = A',
+          note: 'Term AB is completely absorbed into A. Minimal expression is single literal A.'
+        }
+      ];
+    }
+
+    if (preset === 'demorgan') {
+      return [
+        {
+          step: 1,
+          law: 'Initial Boolean Expression',
+          expr: "F = (A + B)'",
+          note: 'Negation / complement of a logical OR (NOR function).'
+        },
+        {
+          step: 2,
+          law: "De Morgan's Theorem (NOR Dual)",
+          expr: "F = A' · B'",
+          note: "The complement of a disjunction equals the conjunction of the individual complements: (A + B)' = A'B'."
+        },
+        {
+          step: 3,
+          law: "Complement Check 1 (X + X' = 1)",
+          expr: "(A + B) + (A'B') = (A + B + A')(A + B + B') = (1 + B)(A + 1) = 1 · 1 = 1",
+          note: "Verify algebraic complement condition: F + F' must identically equal 1."
+        },
+        {
+          step: 4,
+          law: "Complement Check 2 (X · X' = 0)",
+          expr: "(A + B) · (A'B') = A · A'B' + B · A'B' = 0 + 0 = 0",
+          note: "Verify orthogonality condition: F · F' must identically equal 0."
+        },
+        {
+          step: 5,
+          law: 'Minimal SOP Result',
+          expr: "F = A'B'",
+          note: "De Morgan duality verified. Implemented with a single 2-input AND gate with inverted inputs."
+        }
+      ];
+    }
+
     const qm = this.solveQuineMcCluskey(numVars, minterms, dontCares);
     const steps = [];
 
@@ -421,11 +578,12 @@ export class DigitalLogicSuite {
 
     if (mintermTerms.length === 0) {
       return [
-        { law: 'Null / Annihilation Law', expr: 'F = 0', note: 'No active minterms. Output is permanently LOW (GND).' }
+        { step: 1, law: 'Null / Annihilation Law', expr: 'F = 0', note: 'No active minterms. Output is permanently LOW (GND).' }
       ];
     }
 
     steps.push({
+      step: 1,
       law: 'Canonical Sum-of-Minterms (SOP Expansion)',
       expr: 'F = ' + (mintermTerms.join(' + ') || '0'),
       note: 'Represent each active truth-table 1-cell as an AND-product of input literals.'
@@ -433,6 +591,7 @@ export class DigitalLogicSuite {
 
     if (mintermTerms.length > 1) {
       steps.push({
+        step: 2,
         law: "Adjacency Theorem & Distribution: XY + XY' = X(Y + Y')",
         expr: 'F = ' + (qm.terms.map(t => `(${t.term})`).join(' + ') || qm.sop),
         note: 'Factor common literals between Gray-code adjacent terms differing by exactly one negated variable.'
@@ -440,12 +599,14 @@ export class DigitalLogicSuite {
     }
 
     steps.push({
+      step: steps.length + 1,
       law: "Complement & Identity Laws: (Y + Y' = 1, X · 1 = X)",
       expr: 'F = ' + (qm.sop || '0'),
       note: 'Complementary pairs annihilate to logic 1; remaining essential literals form minimal terms.'
     });
 
     steps.push({
+      step: steps.length + 1,
       law: 'Quine-McCluskey & Consensus Verification',
       expr: 'F(minimized) = ' + (qm.sop || '0'),
       note: `Verified irredundant minimal SOP via prime implicant coverage (${qm.essentialPIs.length} essential group${qm.essentialPIs.length === 1 ? '' : 's'}).`

@@ -1200,14 +1200,112 @@ class DeldApp {
     const mountedBase = this.sim.icBases.find(b => b.icId === icId);
     let activeRowIndex = -1;
 
-    if (mountedBase && this.sim.power) {
-      if (headers.length >= 3 && (headers[0] === 'A' || headers[0] === '1A') && (headers[1] === 'B' || headers[1] === '1B')) {
-        const inA = mountedBase.pins[1] ? mountedBase.pins[1].level : 0;
-        const inB = mountedBase.pins[2] ? mountedBase.pins[2].level : 0;
+    if (mountedBase && this.sim.power && mountedBase.pins) {
+      const getPin = (p) => mountedBase.pins[p] ? (mountedBase.pins[p].level || 0) : 0;
+
+      if (['74LS00', '74LS08', '74LS32', '74LS86', '74LS266'].includes(icId)) {
+        // Gate 1: Pin 1 (1A), Pin 2 (1B)
+        const inA = getPin(1);
+        const inB = getPin(2);
         activeRowIndex = rows.findIndex(r => String(r[0]) === String(inA) && String(r[1]) === String(inB));
-      } else if (headers.length >= 2 && (headers[0] === 'A' || headers[0] === '1A')) {
-        const inA = mountedBase.pins[1] ? mountedBase.pins[1].level : 0;
+      } else if (icId === '74LS02') {
+        // 74LS02 NOR: Gate 1 Inputs are Pin 2 (1A) and Pin 3 (1B)
+        const inA = getPin(2);
+        const inB = getPin(3);
+        activeRowIndex = rows.findIndex(r => String(r[0]) === String(inA) && String(r[1]) === String(inB));
+      } else if (icId === '74LS04' || icId === '74LS14') {
+        // Inverter: Pin 1 (1A)
+        const inA = getPin(1);
         activeRowIndex = rows.findIndex(r => String(r[0]) === String(inA));
+      } else if (icId === '74LS10' || icId === '74LS11' || icId === '74LS27') {
+        // 3-input gates: Gate 1 pins 1, 2, 13
+        const inA = getPin(1);
+        const inB = getPin(2);
+        const inC = getPin(13);
+        activeRowIndex = rows.findIndex(r => String(r[0]) === String(inA) && String(r[1]) === String(inB) && String(r[2]) === String(inC));
+      } else if (icId === '74LS20' || icId === '74LS21') {
+        const allOnes = getPin(1) === 1 && getPin(2) === 1 && getPin(4) === 1 && getPin(5) === 1;
+        activeRowIndex = allOnes ? 0 : 1;
+      } else if (icId === '74LS30') {
+        const allOnes = [1, 2, 3, 4, 5, 6, 11, 12].every(p => getPin(p) === 1);
+        activeRowIndex = allOnes ? 0 : 1;
+      } else if (icId === '74LS85') {
+        // 4-bit Magnitude Comparator
+        const a = (getPin(15) << 3) | (getPin(13) << 2) | (getPin(12) << 1) | getPin(10);
+        const b = (getPin(1) << 3) | (getPin(14) << 2) | (getPin(11) << 1) | getPin(9);
+        if (a > b) activeRowIndex = 0;
+        else if (a < b) activeRowIndex = 1;
+        else activeRowIndex = 2;
+      } else if (icId === '74LS151') {
+        // 8:1 MUX: Pin 7 (S#), Pins 9(C), 10(B), 11(A)
+        const s = getPin(7);
+        if (s === 1) {
+          activeRowIndex = 0;
+        } else {
+          const sel = (getPin(9) << 2) | (getPin(10) << 1) | getPin(11);
+          activeRowIndex = Math.min(rows.length - 1, sel + 1);
+        }
+      } else if (icId === '74LS153') {
+        // Dual 4:1 MUX: Pin 1 (1G#), Pins 2(B), 14(A)
+        const g1 = getPin(1);
+        if (g1 === 1) {
+          activeRowIndex = 0;
+        } else {
+          const sel = (getPin(2) << 1) | getPin(14);
+          activeRowIndex = Math.min(rows.length - 1, sel + 1);
+        }
+      } else if (icId === '74LS157') {
+        // Quad 2:1 MUX: Pin 15 (STROBE#), Pin 1 (SELECT)
+        const strobe = getPin(15);
+        if (strobe === 1) {
+          activeRowIndex = 0;
+        } else {
+          activeRowIndex = getPin(1) === 0 ? 1 : 2;
+        }
+      } else if (icId === '74LS138') {
+        // 3:8 Decoder: G1 (pin 6), G2A# (pin 4), G2B# (pin 5)
+        const en = getPin(6) === 1 && getPin(4) === 0 && getPin(5) === 0;
+        if (!en) {
+          activeRowIndex = 0;
+        } else {
+          const sel = (getPin(3) << 2) | (getPin(2) << 1) | getPin(1);
+          activeRowIndex = Math.min(rows.length - 1, sel + 1);
+        }
+      } else if (icId === '74LS148') {
+        // 8:3 Priority Encoder: Pin 5 (EI#), Inputs 4#(1), 5#(2), 6#(3), 7#(4), 0#(10), 1#(11), 2#(12), 3#(13)
+        const ei = getPin(5);
+        if (ei === 1) {
+          activeRowIndex = 0;
+        } else {
+          const priorityPins = [
+            { row: 2, pin: 4 },  // 7#
+            { row: 3, pin: 3 },  // 6#
+            { row: 4, pin: 2 },  // 5#
+            { row: 5, pin: 1 },  // 4#
+            { row: 6, pin: 13 }, // 3#
+            { row: 7, pin: 12 }, // 2#
+            { row: 8, pin: 11 }, // 1#
+            { row: 9, pin: 10 }  // 0#
+          ];
+          const match = priorityPins.find(p => getPin(p.pin) === 0);
+          activeRowIndex = match ? match.row : 1;
+        }
+      } else if (icId === '74LS74') {
+        // Dual D FF
+        const pre = getPin(4);
+        const clr = getPin(1);
+        if (pre === 0 && clr === 1) activeRowIndex = 0;
+        else if (pre === 1 && clr === 0) activeRowIndex = 1;
+        else if (pre === 0 && clr === 0) activeRowIndex = 2;
+        else activeRowIndex = 3;
+      } else {
+        // Generic fallback: check first 1 or 2 pins
+        const inPins = Object.entries(ic.pinout || {}).filter(([p, inf]) => inf.type === 'input').map(([p]) => Number(p));
+        if (inPins.length >= 2) {
+          const v0 = getPin(inPins[0]);
+          const v1 = getPin(inPins[1]);
+          activeRowIndex = rows.findIndex(r => (String(r[0]) === String(v0) || r[0] === 'X') && (String(r[1]) === String(v1) || r[1] === 'X'));
+        }
       }
     }
 
@@ -1735,18 +1833,26 @@ class DeldApp {
       modal.querySelectorAll('.algebraic-preset-btn[data-preset]').forEach(btn => {
         btn.addEventListener('click', () => {
           const preset = btn.getAttribute('data-preset');
+          this.currentAlgebraicPreset = preset;
           if (preset === 'consensus') {
             this.suite.setVarsCount(3);
             this.suite.minterms = new Set([3, 5, 6, 7]); // AB + A'C + BC
+            this.suite.dontCares = new Set([]);
           } else if (preset === 'absorption') {
             this.suite.setVarsCount(2);
             this.suite.minterms = new Set([2, 3]); // A + AB = A
+            this.suite.dontCares = new Set([]);
           } else if (preset === 'demorgan') {
             this.suite.setVarsCount(2);
             this.suite.minterms = new Set([0]); // (A+B)' = A'B'
+            this.suite.dontCares = new Set([]);
+          } else if (preset === 'current') {
+            if (this.suite.liveSync) {
+              this.updateLogicSuiteLive();
+            }
           }
           this.renderKMapTab();
-          this.renderSimplifierTab();
+          this.renderSimplifierTab(preset);
         });
       });
 
@@ -2218,6 +2324,247 @@ class DeldApp {
       this.showToast(`Set kit switches to row m${rowIndex}!`, 'success');
       this.updateLogicSuiteLive();
     }
+  }
+
+  // --- ALGEBRAIC SIMPLIFIER TAB RENDERER ---
+  renderSimplifierTab(preset = null) {
+    const container = document.getElementById('suiteAlgebraicStepsContainer');
+    if (!container) return;
+
+    if (preset) {
+      this.currentAlgebraicPreset = preset;
+    } else if (!this.currentAlgebraicPreset) {
+      this.currentAlgebraicPreset = 'current';
+    }
+
+    // Update active preset button style
+    const modal = document.getElementById('logic-suite-modal');
+    if (modal) {
+      modal.querySelectorAll('.algebraic-preset-btn').forEach(btn => {
+        const p = btn.getAttribute('data-preset');
+        if (p === this.currentAlgebraicPreset) {
+          btn.className = 'algebraic-preset-btn active px-3 py-1.5 rounded-lg bg-purple-600 text-white font-bold text-xs shadow-xs';
+        } else {
+          btn.className = 'algebraic-preset-btn px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700';
+        }
+      });
+    }
+
+    const steps = this.suite.generateAlgebraicProof(
+      this.suite.varsCount,
+      this.suite.minterms,
+      this.suite.dontCares,
+      this.currentAlgebraicPreset
+    );
+
+    let html = '';
+    steps.forEach((step, idx) => {
+      const stepNum = step.step || (idx + 1);
+      const isFinal = idx === steps.length - 1;
+      const borderClass = isFinal ? 'border-2 border-purple-500 bg-purple-50/40' : 'border border-slate-200 bg-white';
+      const badgeClass = isFinal ? 'bg-purple-600 text-white font-black' : 'bg-purple-100 text-purple-800 font-bold';
+
+      html += `
+        <div class="p-4 rounded-xl ${borderClass} shadow-xs space-y-2 transition-all hover:shadow-md">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded text-[10px] ${badgeClass}">STEP ${stepNum}</span>
+              <span class="text-xs font-bold text-slate-800">${step.law}</span>
+            </div>
+            ${isFinal ? '<span class="text-[10px] font-extrabold text-purple-600 uppercase tracking-wider bg-purple-100 px-2.5 py-0.5 rounded-full border border-purple-300">★ Simplified Irredundant SOP</span>' : ''}
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-900 text-purple-300 font-mono text-sm font-extrabold tracking-wide overflow-x-auto select-all shadow-inner">
+            ${step.expr}
+          </div>
+          <p class="text-xs text-slate-600 leading-relaxed">${step.note}</p>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  }
+
+  // --- CIRCUIT DIAGRAM TAB RENDERER ---
+  renderCircuitTab() {
+    const origBadge = document.getElementById('circuitOrigGatesBadge');
+    const minBadge = document.getElementById('circuitMinGatesBadge');
+    const origContainer = document.getElementById('circuitOrigSvgContainer');
+    const minContainer = document.getElementById('circuitMinSvgContainer');
+    if (!origContainer || !minContainer) return;
+
+    const spec = this.suite.getCircuitSchematicSpec();
+    const qm = this.suite.solveQuineMcCluskey();
+
+    if (origBadge) {
+      origBadge.textContent = `${spec.original.totalGates} Gates (${spec.original.inverters} NOT, ${spec.original.andGates} AND, ${spec.original.orGates} OR)`;
+    }
+    if (minBadge) {
+      minBadge.textContent = `${spec.minimized.totalGates} Gates (${spec.minimized.reductionPercent}% reduction)`;
+    }
+
+    const vars = this.suite.varNames.slice(0, this.suite.varsCount);
+    const origTerms = Array.from(this.suite.minterms).sort((a,b) => a-b).map(m => {
+      const bin = m.toString(2).padStart(this.suite.varsCount, '0');
+      return bin.split('').map((b, idx) => b === '1' ? vars[idx] : vars[idx] + "'").join('');
+    });
+
+    const minTerms = qm.terms.map(t => t.term);
+
+    origContainer.innerHTML = this.renderSchematicSVG(vars, origTerms, 'Original Canonical SOP', false);
+    minContainer.innerHTML = this.renderSchematicSVG(vars, minTerms, 'Minimized Irredundant Schematic', true);
+  }
+
+  /**
+   * Generates a clean, crisp logic gate schematic SVG.
+   */
+  renderSchematicSVG(vars, terms, title, isMinimized = false) {
+    const W = 520;
+    const H = 260;
+    const themeColor = isMinimized ? '#10b981' : '#0284c7';
+    const gateFill = isMinimized ? '#ecfdf5' : '#f0f9ff';
+    const gateStroke = isMinimized ? '#059669' : '#0284c7';
+
+    if (!terms || terms.length === 0) {
+      return `
+        <svg viewBox="0 0 ${W} ${H}" class="w-full h-full select-none" style="min-height: 240px;">
+          <rect width="${W}" height="${H}" rx="12" fill="#0b1329"/>
+          <text x="${W/2}" y="${H/2 - 10}" text-anchor="middle" fill="#64748b" font-family="monospace" font-size="14" font-weight="bold">No Active Minterms (Output F = 0)</text>
+          <path d="M ${W/2 - 40} ${H/2 + 20} H ${W/2 + 40}" stroke="#ef4444" stroke-width="2"/>
+          <path d="M ${W/2 - 25} ${H/2 + 26} H ${W/2 + 25}" stroke="#ef4444" stroke-width="2"/>
+          <path d="M ${W/2 - 10} ${H/2 + 32} H ${W/2 + 10}" stroke="#ef4444" stroke-width="2"/>
+          <text x="${W/2}" y="${H/2 + 50}" text-anchor="middle" fill="#ef4444" font-family="monospace" font-size="11" font-weight="bold">GND (LOW)</text>
+        </svg>
+      `;
+    }
+
+    const varColors = {
+      'A': '#38bdf8',
+      'B': '#34d399',
+      'C': '#a78bfa',
+      'D': '#fb923c'
+    };
+
+    const numTerms = terms.length;
+    const midY = H / 2;
+    const termSpacing = Math.min(55, Math.max(34, 180 / (numTerms || 1)));
+    const startY = midY - ((numTerms - 1) * termSpacing) / 2;
+
+    const xRailsStart = 30;
+    const railPitch = 16;
+    const xAndGates = 190;
+    const xOrGate = 400;
+    const xOut = 495;
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" class="w-full h-full select-none" style="min-height: 240px;">`;
+    svg += `<rect width="${W}" height="${H}" rx="12" fill="#0b1329"/>`;
+    svg += `<text x="16" y="22" fill="#94a3b8" font-family="monospace" font-size="10" font-weight="bold">${title} • ${numTerms} Term${numTerms === 1 ? '' : 's'}</text>`;
+
+    const railXMap = {};
+    vars.forEach((v, vIdx) => {
+      const xTrue = xRailsStart + vIdx * railPitch * 2;
+      const xComp = xTrue + railPitch;
+      railXMap[v] = xTrue;
+      railXMap[v + "'"] = xComp;
+
+      const col = varColors[v] || '#94a3b8';
+
+      // True Rail
+      svg += `<line x1="${xTrue}" y1="36" x2="${xTrue}" y2="${H - 20}" stroke="${col}" stroke-width="1.5" stroke-opacity="0.8"/>`;
+      svg += `<circle cx="${xTrue}" cy="36" r="3" fill="${col}"/>`;
+      svg += `<text x="${xTrue}" y="32" fill="${col}" font-family="monospace" font-size="10" font-weight="extrabold" text-anchor="middle">${v}</text>`;
+
+      // Inverter for Complemented Rail
+      svg += `<line x1="${xTrue}" y1="52" x2="${xComp}" y2="52" stroke="${col}" stroke-width="1.5" stroke-opacity="0.7"/>`;
+      svg += `<circle cx="${xTrue}" cy="52" r="2" fill="${col}"/>`;
+      svg += `<polygon points="${xComp-8},48 ${xComp},52 ${xComp-8},56" fill="#1e293b" stroke="#64748b" stroke-width="1"/>`;
+      svg += `<circle cx="${xComp+2}" cy="52" r="2" fill="#1e293b" stroke="#64748b" stroke-width="1"/>`;
+      svg += `<line x1="${xComp}" y1="54" x2="${xComp}" y2="${H - 20}" stroke="${col}" stroke-width="1.5" stroke-dasharray="3,2" stroke-opacity="0.7"/>`;
+      svg += `<text x="${xComp}" y="42" fill="#64748b" font-family="monospace" font-size="8" font-weight="bold" text-anchor="middle">${v}'</text>`;
+    });
+
+    const andOutputs = [];
+
+    terms.forEach((term, tIdx) => {
+      const yTerm = startY + tIdx * termSpacing;
+
+      const lits = [];
+      for (let i = 0; i < term.length; i++) {
+        if (vars.includes(term[i])) {
+          let lit = term[i];
+          if (term[i + 1] === "'") {
+            lit += "'";
+            i++;
+          }
+          lits.push(lit);
+        }
+      }
+
+      if (lits.length === 1 && numTerms === 1) {
+        const rx = railXMap[lits[0]] || xRailsStart;
+        svg += `<line x1="${rx}" y1="${yTerm}" x2="${xOut}" y2="${yTerm}" stroke="${themeColor}" stroke-width="2"/>`;
+        svg += `<circle cx="${rx}" cy="${yTerm}" r="3" fill="${themeColor}"/>`;
+        andOutputs.push({ x: xOut, y: yTerm });
+      } else {
+        const andW = 32;
+        const andH = 26;
+        const gX = xAndGates;
+        const gY = yTerm - andH / 2;
+
+        const inY1 = yTerm - 6;
+        const inY2 = yTerm + 6;
+        const inYs = lits.length <= 1 ? [yTerm] : [inY1, inY2];
+
+        lits.forEach((lit, lIdx) => {
+          const rx = railXMap[lit];
+          const targetY = inYs[lIdx % inYs.length];
+          if (rx) {
+            const col = varColors[lit.replace("'", '')] || '#94a3b8';
+            svg += `<circle cx="${rx}" cy="${targetY}" r="2.5" fill="${col}"/>`;
+            svg += `<line x1="${rx}" y1="${targetY}" x2="${gX}" y2="${targetY}" stroke="${col}" stroke-width="1.5"/>`;
+          }
+        });
+
+        svg += `
+          <path d="M ${gX} ${gY} h 16 a 13 13 0 0 1 13 13 a 13 13 0 0 1 -13 13 h -16 z"
+                fill="${gateFill}" fill-opacity="0.15" stroke="${gateStroke}" stroke-width="2"/>
+          <text x="${gX + 13}" y="${yTerm + 3}" fill="#cbd5e1" font-family="monospace" font-size="8" font-weight="bold" text-anchor="middle">${term}</text>
+        `;
+
+        const outX = gX + 29;
+        andOutputs.push({ x: outX, y: yTerm });
+      }
+    });
+
+    if (numTerms > 1) {
+      const orW = 38;
+      const orH = Math.max(38, Math.min(100, numTerms * 20));
+      const orX = xOrGate;
+      const orY = midY - orH / 2;
+
+      andOutputs.forEach((pt, pIdx) => {
+        const orInY = midY - ((numTerms - 1) * 10) / 2 + pIdx * 10;
+        svg += `<path d="M ${pt.x} ${pt.y} H ${orX - 12} L ${orX + 4} ${orInY}" fill="none" stroke="${themeColor}" stroke-width="1.8"/>`;
+      });
+
+      svg += `
+        <path d="M ${orX} ${orY} q 12 ${orH/2} 0 ${orH} q 24 0 38 -${orH/2} q -14 -${orH/2} -38 -${orH/2} z"
+              fill="${gateFill}" fill-opacity="0.2" stroke="${gateStroke}" stroke-width="2.2"/>
+        <text x="${orX + 16}" y="${midY + 4}" fill="#ffffff" font-family="monospace" font-size="10" font-weight="extrabold" text-anchor="middle">OR</text>
+      `;
+
+      const finalOutX = orX + 38;
+      svg += `<line x1="${finalOutX}" y1="${midY}" x2="${xOut}" y2="${midY}" stroke="${themeColor}" stroke-width="2.5"/>`;
+      svg += `<circle cx="${xOut}" cy="${midY}" r="4" fill="${themeColor}"/>`;
+      svg += `<text x="${xOut + 8}" y="${midY + 4}" fill="#22c55e" font-family="monospace" font-size="12" font-weight="extrabold">F (OUT)</text>`;
+    } else if (numTerms === 1 && andOutputs.length > 0) {
+      const pt = andOutputs[0];
+      svg += `<line x1="${pt.x}" y1="${pt.y}" x2="${xOut}" y2="${pt.y}" stroke="${themeColor}" stroke-width="2.5"/>`;
+      svg += `<circle cx="${xOut}" cy="${pt.y}" r="4" fill="${themeColor}"/>`;
+      svg += `<text x="${xOut + 8}" y="${pt.y + 4}" fill="#22c55e" font-family="monospace" font-size="12" font-weight="extrabold">F (OUT)</text>`;
+    }
+
+    svg += `</svg>`;
+    return svg;
   }
 
   // --- COUNTER DESIGNER TAB RENDERER (LIVE) ---

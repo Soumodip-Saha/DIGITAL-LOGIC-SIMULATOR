@@ -527,6 +527,47 @@ export const IC_LIBRARY = {
     }
   },
 
+  '74LS266': {
+    id: '74LS266',
+    name: '74LS266 Quad 2-Input Exclusive-NOR (XNOR) Gate',
+    category: IC_CATEGORIES.GATES,
+    pins: 14,
+    description: 'Contains four independent 2-input Exclusive-NOR (equality comparator) gates.',
+    pinout: {
+      1: { name: '1A', type: 'input', desc: 'Gate 1 Input A' },
+      2: { name: '1B', type: 'input', desc: 'Gate 1 Input B' },
+      3: { name: '1Y', type: 'output', desc: 'Gate 1 Output (XNOR)' },
+      4: { name: '2A', type: 'input', desc: 'Gate 2 Input A' },
+      5: { name: '2B', type: 'input', desc: 'Gate 2 Input B' },
+      6: { name: '2Y', type: 'output', desc: 'Gate 2 Output (XNOR)' },
+      7: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      8: { name: '3Y', type: 'output', desc: 'Gate 3 Output (XNOR)' },
+      9: { name: '3A', type: 'input', desc: 'Gate 3 Input A' },
+      10: { name: '3B', type: 'input', desc: 'Gate 3 Input B' },
+      11: { name: '4Y', type: 'output', desc: 'Gate 4 Output (XNOR)' },
+      12: { name: '4A', type: 'input', desc: 'Gate 4 Input A' },
+      13: { name: '4B', type: 'input', desc: 'Gate 4 Input B' },
+      14: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['Input A', 'Input B', 'Output Y (XNOR)'],
+      rows: [
+        ['0', '0', '1'],
+        ['0', '1', '0'],
+        ['1', '0', '0'],
+        ['1', '1', '1']
+      ]
+    },
+    simulate: (inputs) => {
+      return {
+        3: ((inputs[1] || 0) ^ (inputs[2] || 0)) === 0 ? 1 : 0,
+        6: ((inputs[4] || 0) ^ (inputs[5] || 0)) === 0 ? 1 : 0,
+        8: ((inputs[9] || 0) ^ (inputs[10] || 0)) === 0 ? 1 : 0,
+        11: ((inputs[12] || 0) ^ (inputs[13] || 0)) === 0 ? 1 : 0
+      };
+    }
+  },
+
   // ==========================================
   // ARITHMETIC & COMPARATORS
   // ==========================================
@@ -834,6 +875,143 @@ export const IC_LIBRARY = {
       }
 
       return { 7: y1, 9: y2 };
+    }
+  },
+
+  '74LS157': {
+    id: '74LS157',
+    name: '74LS157 Quad 2-Line to 1-Line Data Selector / Multiplexer',
+    category: IC_CATEGORIES.COMBINATIONAL,
+    pins: 16,
+    description: 'Four 2-to-1 multiplexers with a common Select input and active-low Strobe/Enable.',
+    pinout: {
+      1: { name: 'S', type: 'input', desc: 'Common Select Input (0=A, 1=B)' },
+      2: { name: '1A', type: 'input', desc: 'MUX 1 Input A' },
+      3: { name: '1B', type: 'input', desc: 'MUX 1 Input B' },
+      4: { name: '1Y', type: 'output', desc: 'MUX 1 Output' },
+      5: { name: '2A', type: 'input', desc: 'MUX 2 Input A' },
+      6: { name: '2B', type: 'input', desc: 'MUX 2 Input B' },
+      7: { name: '2Y', type: 'output', desc: 'MUX 2 Output' },
+      8: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      9: { name: '3Y', type: 'output', desc: 'MUX 3 Output' },
+      10: { name: '3B', type: 'input', desc: 'MUX 3 Input B' },
+      11: { name: '3A', type: 'input', desc: 'MUX 3 Input A' },
+      12: { name: '4Y', type: 'output', desc: 'MUX 4 Output' },
+      13: { name: '4B', type: 'input', desc: 'MUX 4 Input B' },
+      14: { name: '4A', type: 'input', desc: 'MUX 4 Input A' },
+      15: { name: 'G#', type: 'input', desc: 'Strobe / Enable (Active Low)' },
+      16: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['G# (Strobe)', 'S (Select)', 'A Inputs', 'B Inputs', 'Outputs 1Y-4Y'],
+      rows: [
+        ['1', 'X', 'X', 'X', 'All LOW (0 0 0 0)'],
+        ['0', '0', 'Data A', 'X', 'Follows A (1A, 2A, 3A, 4A)'],
+        ['0', '1', 'X', 'Data B', 'Follows B (1B, 2B, 3B, 4B)']
+      ]
+    },
+    simulate: (inputs) => {
+      const strobe = inputs[15] !== undefined ? inputs[15] : 0;
+      if (strobe === 1) {
+        return { 4: 0, 7: 0, 9: 0, 12: 0 };
+      }
+      const sel = inputs[1] || 0;
+      if (sel === 0) {
+        return {
+          4: inputs[2] || 0,
+          7: inputs[5] || 0,
+          9: inputs[11] || 0,
+          12: inputs[14] || 0
+        };
+      } else {
+        return {
+          4: inputs[3] || 0,
+          7: inputs[6] || 0,
+          9: inputs[10] || 0,
+          12: inputs[13] || 0
+        };
+      }
+    }
+  },
+
+  '74LS148': {
+    id: '74LS148',
+    name: '74LS148 8-to-3 Line Priority Encoder',
+    category: IC_CATEGORIES.COMBINATIONAL,
+    pins: 16,
+    description: 'Encodes 8 active-low data inputs (0#..7#) to a 3-bit active-low binary code (A2#..A0#), with active-low Group Select (GS#) and Enable Output (EO#) for cascading.',
+    pinout: {
+      1: { name: '4#', type: 'input', desc: 'Input 4 (Active Low)' },
+      2: { name: '5#', type: 'input', desc: 'Input 5 (Active Low)' },
+      3: { name: '6#', type: 'input', desc: 'Input 6 (Active Low)' },
+      4: { name: '7#', type: 'input', desc: 'Input 7 (Active Low, Highest Priority)' },
+      5: { name: 'EI#', type: 'input', desc: 'Enable Input (Active Low)' },
+      6: { name: 'A2#', type: 'output', desc: 'Binary Address Output 2 (Active Low)' },
+      7: { name: 'A1#', type: 'output', desc: 'Binary Address Output 1 (Active Low)' },
+      8: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      9: { name: 'A0#', type: 'output', desc: 'Binary Address Output 0 (Active Low)' },
+      10: { name: '0#', type: 'input', desc: 'Input 0 (Active Low, Lowest Priority)' },
+      11: { name: '1#', type: 'input', desc: 'Input 1 (Active Low)' },
+      12: { name: '2#', type: 'input', desc: 'Input 2 (Active Low)' },
+      13: { name: '3#', type: 'input', desc: 'Input 3 (Active Low)' },
+      14: { name: 'GS#', type: 'output', desc: 'Group Select Output (Active Low)' },
+      15: { name: 'EO#', type: 'output', desc: 'Enable Output (Active Low)' },
+      16: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['EI#', '0#', '1#', '2#', '3#', '4#', '5#', '6#', '7#', 'A2#', 'A1#', 'A0#', 'GS#', 'EO#'],
+      rows: [
+        ['1', 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X', '1', '1', '1', '1', '1'],
+        ['0', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '0'],
+        ['0', 'X', 'X', 'X', 'X', 'X', 'X', 'X', '0', '0', '0', '0', '0', '1'],
+        ['0', 'X', 'X', 'X', 'X', 'X', 'X', '0', '1', '0', '0', '1', '0', '1'],
+        ['0', 'X', 'X', 'X', 'X', 'X', '0', '1', '1', '0', '1', '0', '0', '1'],
+        ['0', 'X', 'X', 'X', 'X', '0', '1', '1', '1', '0', '1', '1', '0', '1'],
+        ['0', 'X', 'X', 'X', '0', '1', '1', '1', '1', '1', '0', '0', '0', '1'],
+        ['0', 'X', 'X', '0', '1', '1', '1', '1', '1', '1', '0', '1', '0', '1'],
+        ['0', 'X', '0', '1', '1', '1', '1', '1', '1', '1', '1', '0', '0', '1'],
+        ['0', '0', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '0', '1']
+      ]
+    },
+    simulate: (inputs) => {
+      const ei = inputs[5] !== undefined ? inputs[5] : 0;
+      if (ei === 1) {
+        return { 6: 1, 7: 1, 9: 1, 14: 1, 15: 1 };
+      }
+      const inputPins = [
+        { num: 7, pin: 4 },
+        { num: 6, pin: 3 },
+        { num: 5, pin: 2 },
+        { num: 4, pin: 1 },
+        { num: 3, pin: 13 },
+        { num: 2, pin: 12 },
+        { num: 1, pin: 11 },
+        { num: 0, pin: 10 }
+      ];
+
+      let activeIndex = -1;
+      for (const item of inputPins) {
+        if (inputs[item.pin] === 0) {
+          activeIndex = item.num;
+          break;
+        }
+      }
+
+      if (activeIndex === -1) {
+        return { 6: 1, 7: 1, 9: 1, 14: 1, 15: 0 };
+      }
+
+      const a2 = ((activeIndex >> 2) & 1) === 1 ? 0 : 1;
+      const a1 = ((activeIndex >> 1) & 1) === 1 ? 0 : 1;
+      const a0 = ((activeIndex >> 0) & 1) === 1 ? 0 : 1;
+
+      return {
+        6: a2,
+        7: a1,
+        9: a0,
+        14: 0,
+        15: 1
+      };
     }
   },
 
@@ -1252,6 +1430,15 @@ export const IC_LIBRARY = {
       count: 0,
       clk_prev: 0
     }),
+    truthTable: {
+      headers: ['LOAD#', 'CTEN#', 'D/U#', 'CLK', 'Mode / Action'],
+      rows: [
+        ['0', 'X', 'X', 'X', 'Asynchronous Parallel Load (QA..QD ← A..D)'],
+        ['1', '1', 'X', 'X', 'Inhibit / Hold (No change)'],
+        ['1', '0', '0', '↑', 'Count Up (Binary increment modulo-16)'],
+        ['1', '0', '1', '↑', 'Count Down (Binary decrement modulo-16)']
+      ]
+    },
     simulate: (inputs, state) => {
       const load = inputs[11] !== undefined ? inputs[11] : 1;
       const clk = inputs[14] || 0;

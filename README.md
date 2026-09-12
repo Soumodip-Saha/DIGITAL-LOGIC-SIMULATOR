@@ -62,7 +62,7 @@ npx serve .
 
 ---
 
-## 🔬 Unlocked IC Library (25+ Components)
+## 🔬 Unlocked IC Library (29 Components)
 
 | Part Number | Description | Category | Pins |
 | :--- | :--- | :--- | :--- |
@@ -79,13 +79,16 @@ npx serve .
 | **74LS30** | 8-Input NAND Gate | Logic Gates | 14 |
 | **74LS32** | Quad 2-Input OR Gate | Logic Gates | 14 |
 | **74LS86** | Quad 2-Input XOR Gate | Logic Gates | 14 |
-| **74LS47** | BCD to 7-Segment Decoder / Driver | Combinational | 16 |
+| **74LS266** | Quad 2-Input Exclusive-NOR (XNOR) Gate | Logic Gates | 14 |
 | **74LS83** | 4-Bit Binary Full Adder | Arithmetic | 16 |
 | **74LS85** | 4-Bit Magnitude Comparator | Arithmetic | 16 |
 | **74LS138** | 3-to-8 Line Decoder / Demultiplexer | Combinational | 16 |
 | **74LS139** | Dual 2-to-4 Line Decoder / Demux | Combinational | 16 |
+| **74LS148** | 8-to-3 Line Priority Encoder | Combinational | 16 |
 | **74LS151** | 8-to-1 Multiplexer | Combinational | 16 |
 | **74LS153** | Dual 4-to-1 Multiplexer | Combinational | 16 |
+| **74LS157** | Quad 2-to-1 Multiplexer | Combinational | 16 |
+| **74LS47** | BCD to 7-Segment Decoder / Driver | Combinational | 16 |
 | **74LS74** | Dual D Flip-Flop with Preset & Clear | Sequential | 14 |
 | **74LS76** | Dual J-K Flip-Flop with Preset & Clear | Sequential | 16 |
 | **74LS90** | Decade / BCD Counter (Mod-2 / Mod-5) | Counters | 14 |
