@@ -666,7 +666,7 @@ const IC_LIBRARY = {
       const b = ((inputs[1] || 0) << 3) | ((inputs[14] || 0) << 2) | ((inputs[11] || 0) << 1) | (inputs[9] || 0);
 
       const iAgB = inputs[4] || 0;
-      const iAeB = inputs[3] !== undefined ? inputs[3] : 1;
+      const iAeB = inputs[3] !== undefined ? inputs[3] : (inputs[4] === undefined && inputs[2] === undefined ? 1 : 0);
       const iAlB = inputs[2] || 0;
 
       let oAgB = 0, oAeB = 0, oAlB = 0;
@@ -676,11 +676,71 @@ const IC_LIBRARY = {
         oAlB = 1;
       } else {
         if (iAeB === 1) oAeB = 1;
-        else if (iAgB === 1) oAgB = 1;
-        else if (iAlB === 1) oAlB = 1;
+        else if (iAgB === 1 && iAlB === 0) oAgB = 1;
+        else if (iAlB === 1 && iAgB === 0) oAlB = 1;
+        else if (iAgB === 0 && iAlB === 0) oAeB = 1;
       }
 
       return { 5: oAgB, 6: oAeB, 7: oAlB };
+    }
+  },
+
+  '74LS283': {
+    id: '74LS283',
+    name: '74LS283 4-Bit Binary Full Adder with Fast Carry',
+    category: IC_CATEGORIES.ARITHMETIC,
+    pins: 16,
+    description: 'Adds two 4-bit binary numbers with carry-in and carry-out using internal look-ahead fast carry (standard pinout: VCC=16, GND=8).',
+    pinout: {
+      1: { name: 'S2', type: 'output', desc: 'Sum Bit 2' },
+      2: { name: 'B2', type: 'input', desc: 'Operand B Bit 2' },
+      3: { name: 'A2', type: 'input', desc: 'Operand A Bit 2' },
+      4: { name: 'S1', type: 'output', desc: 'Sum Bit 1' },
+      5: { name: 'A1', type: 'input', desc: 'Operand A Bit 1' },
+      6: { name: 'B1', type: 'input', desc: 'Operand B Bit 1' },
+      7: { name: 'C0', type: 'input', desc: 'Carry In' },
+      8: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      9: { name: 'C4', type: 'output', desc: 'Carry Out Bit 4' },
+      10: { name: 'S4', type: 'output', desc: 'Sum Bit 4' },
+      11: { name: 'B4', type: 'input', desc: 'Operand B Bit 4' },
+      12: { name: 'A4', type: 'input', desc: 'Operand A Bit 4' },
+      13: { name: 'S3', type: 'output', desc: 'Sum Bit 3' },
+      14: { name: 'A3', type: 'input', desc: 'Operand A Bit 3' },
+      15: { name: 'B3', type: 'input', desc: 'Operand B Bit 3' },
+      16: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['A (4-bit)', 'B (4-bit)', 'C0 (In)', 'Sum (4-bit)', 'C4 (Out)'],
+      rows: [
+        ['0000', '0000', '0', '0000', '0'],
+        ['0101 (5)', '0011 (3)', '0', '1000 (8)', '0'],
+        ['1111 (15)', '0001 (1)', '0', '0000 (0)', '1 (Carry)'],
+        ['1010 (10)', '0110 (6)', '1', '0001 (1)', '1 (Carry)']
+      ]
+    },
+    simulate: (inputs) => {
+      const a1 = inputs[5] || 0;
+      const a2 = inputs[3] || 0;
+      const a3 = inputs[14] || 0;
+      const a4 = inputs[12] || 0;
+      const a = (a4 << 3) | (a3 << 2) | (a2 << 1) | a1;
+
+      const b1 = inputs[6] || 0;
+      const b2 = inputs[2] || 0;
+      const b3 = inputs[15] || 0;
+      const b4 = inputs[11] || 0;
+      const b = (b4 << 3) | (b3 << 2) | (b2 << 1) | b1;
+
+      const cIn = inputs[7] || 0;
+      const sum = a + b + cIn;
+
+      return {
+        4: (sum >> 0) & 1,   // S1
+        1: (sum >> 1) & 1,   // S2
+        13: (sum >> 2) & 1,  // S3
+        10: (sum >> 3) & 1,  // S4
+        9: (sum >> 4) & 1    // C4
+      };
     }
   },
 
@@ -721,9 +781,9 @@ const IC_LIBRARY = {
       ]
     },
     simulate: (inputs) => {
-      const g1 = inputs[6] || 0;
-      const g2a = inputs[4] || 0;
-      const g2b = inputs[5] || 0;
+      const g1 = inputs[6] !== undefined ? inputs[6] : 1;
+      const g2a = inputs[4] !== undefined ? inputs[4] : 0;
+      const g2b = inputs[5] !== undefined ? inputs[5] : 0;
       const enabled = g1 === 1 && g2a === 0 && g2b === 0;
 
       const outputs = { 15: 1, 14: 1, 13: 1, 12: 1, 11: 1, 10: 1, 9: 1, 7: 1 };
@@ -775,16 +835,68 @@ const IC_LIBRARY = {
     simulate: (inputs) => {
       const res = { 4: 1, 5: 1, 6: 1, 7: 1, 12: 1, 11: 1, 10: 1, 9: 1 };
       // Decoder 1
-      if ((inputs[1] || 0) === 0) {
+      const g1 = inputs[1] !== undefined ? inputs[1] : 0;
+      if (g1 === 0) {
         const addr1 = ((inputs[3] || 0) << 1) | (inputs[2] || 0);
         const map1 = [4, 5, 6, 7];
         res[map1[addr1]] = 0;
       }
       // Decoder 2
-      if ((inputs[15] || 0) === 0) {
+      const g2 = inputs[15] !== undefined ? inputs[15] : 0;
+      if (g2 === 0) {
         const addr2 = ((inputs[13] || 0) << 1) | (inputs[14] || 0);
         const map2 = [12, 11, 10, 9];
         res[map2[addr2]] = 0;
+      }
+      return res;
+    }
+  },
+
+  '74LS42': {
+    id: '74LS42',
+    name: '74LS42 4-Line BCD to 10-Line Decimal Decoder',
+    category: IC_CATEGORIES.COMBINATIONAL,
+    pins: 16,
+    description: 'Decodes a 4-bit BCD input to one of ten mutually exclusive active-low decimal outputs.',
+    pinout: {
+      1: { name: '0#', type: 'output', desc: 'Decimal Output 0 (Active Low)' },
+      2: { name: '1#', type: 'output', desc: 'Decimal Output 1 (Active Low)' },
+      3: { name: '2#', type: 'output', desc: 'Decimal Output 2 (Active Low)' },
+      4: { name: '3#', type: 'output', desc: 'Decimal Output 3 (Active Low)' },
+      5: { name: '4#', type: 'output', desc: 'Decimal Output 4 (Active Low)' },
+      6: { name: '5#', type: 'output', desc: 'Decimal Output 5 (Active Low)' },
+      7: { name: '6#', type: 'output', desc: 'Decimal Output 6 (Active Low)' },
+      8: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      9: { name: '7#', type: 'output', desc: 'Decimal Output 7 (Active Low)' },
+      10: { name: '8#', type: 'output', desc: 'Decimal Output 8 (Active Low)' },
+      11: { name: '9#', type: 'output', desc: 'Decimal Output 9 (Active Low)' },
+      12: { name: 'D', type: 'input', desc: 'BCD Input Bit D (MSB)' },
+      13: { name: 'C', type: 'input', desc: 'BCD Input Bit C' },
+      14: { name: 'B', type: 'input', desc: 'BCD Input Bit B' },
+      15: { name: 'A', type: 'input', desc: 'BCD Input Bit A (LSB)' },
+      16: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['Decimal Digit', 'D C B A (BCD)', 'Selected Output (Low)'],
+      rows: [
+        ['0', '0 0 0 0', '0# = 0 (others 1)'],
+        ['1', '0 0 0 1', '1# = 0 (others 1)'],
+        ['5', '0 1 0 1', '5# = 0 (others 1)'],
+        ['9', '1 0 0 1', '9# = 0 (others 1)'],
+        ['10-15 (Invalid BCD)', '1 0 1 0 - 1 1 1 1', 'All outputs = 1']
+      ]
+    },
+    simulate: (inputs) => {
+      const a = inputs[15] || 0;
+      const b = inputs[14] || 0;
+      const c = inputs[13] || 0;
+      const d = inputs[12] || 0;
+      const bcd = (d << 3) | (c << 2) | (b << 1) | a;
+
+      const outPins = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11];
+      const res = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 9: 1, 10: 1, 11: 1 };
+      if (bcd >= 0 && bcd <= 9) {
+        res[outPins[bcd]] = 0;
       }
       return res;
     }
@@ -904,11 +1016,11 @@ const IC_LIBRARY = {
       7: { name: '2Y', type: 'output', desc: 'MUX 2 Output' },
       8: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
       9: { name: '3Y', type: 'output', desc: 'MUX 3 Output' },
-      10: { name: '3B', type: 'input', desc: 'MUX 3 Input B' },
-      11: { name: '3A', type: 'input', desc: 'MUX 3 Input A' },
+      10: { name: '3A', type: 'input', desc: 'MUX 3 Input A' },
+      11: { name: '3B', type: 'input', desc: 'MUX 3 Input B' },
       12: { name: '4Y', type: 'output', desc: 'MUX 4 Output' },
-      13: { name: '4B', type: 'input', desc: 'MUX 4 Input B' },
-      14: { name: '4A', type: 'input', desc: 'MUX 4 Input A' },
+      13: { name: '4A', type: 'input', desc: 'MUX 4 Input A' },
+      14: { name: '4B', type: 'input', desc: 'MUX 4 Input B' },
       15: { name: 'G#', type: 'input', desc: 'Strobe / Enable (Active Low)' },
       16: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
     },
@@ -930,15 +1042,15 @@ const IC_LIBRARY = {
         return {
           4: inputs[2] || 0,
           7: inputs[5] || 0,
-          9: inputs[11] || 0,
-          12: inputs[14] || 0
+          9: inputs[10] || 0,
+          12: inputs[13] || 0
         };
       } else {
         return {
           4: inputs[3] || 0,
           7: inputs[6] || 0,
-          9: inputs[10] || 0,
-          12: inputs[13] || 0
+          9: inputs[11] || 0,
+          12: inputs[14] || 0
         };
       }
     }
@@ -1025,6 +1137,72 @@ const IC_LIBRARY = {
     }
   },
 
+  '74LS147': {
+    id: '74LS147',
+    name: '74LS147 10-Line to 4-Line BCD Priority Encoder',
+    category: IC_CATEGORIES.COMBINATIONAL,
+    pins: 16,
+    description: 'Encodes nine active-low data inputs (1# to 9#) into active-low 4-bit BCD on outputs A#, B#, C#, D# based on priority.',
+    pinout: {
+      1: { name: '4#', type: 'input', desc: 'Input 4 (Active Low)' },
+      2: { name: '5#', type: 'input', desc: 'Input 5 (Active Low)' },
+      3: { name: '6#', type: 'input', desc: 'Input 6 (Active Low)' },
+      4: { name: '7#', type: 'input', desc: 'Input 7 (Active Low)' },
+      5: { name: '8#', type: 'input', desc: 'Input 8 (Active Low)' },
+      6: { name: 'D#', type: 'output', desc: 'BCD Output D (MSB, Active Low)' },
+      7: { name: 'C#', type: 'output', desc: 'BCD Output C (Active Low)' },
+      8: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      9: { name: 'B#', type: 'output', desc: 'BCD Output B (Active Low)' },
+      10: { name: '1#', type: 'input', desc: 'Input 1 (Active Low)' },
+      11: { name: '2#', type: 'input', desc: 'Input 2 (Active Low)' },
+      12: { name: '3#', type: 'input', desc: 'Input 3 (Active Low)' },
+      13: { name: '9#', type: 'input', desc: 'Input 9 (Active Low)' },
+      14: { name: 'A#', type: 'output', desc: 'BCD Output A (LSB, Active Low)' },
+      15: { name: 'NC', type: 'nc', desc: 'No Connection' },
+      16: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' }
+    },
+    truthTable: {
+      headers: ['1#', '2#', '3#', '4#', '5#', '6#', '7#', '8#', '9#', 'D#', 'C#', 'B#', 'A#'],
+      rows: [
+        ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
+        ['X', 'X', 'X', 'X', 'X', 'X', 'X', 'X', '0', '0', '1', '1', '0'],
+        ['X', 'X', 'X', 'X', 'X', 'X', 'X', '0', '1', '0', '1', '1', '1'],
+        ['X', 'X', 'X', 'X', 'X', 'X', '0', '1', '1', '1', '0', '0', '0'],
+        ['X', 'X', 'X', 'X', '0', '1', '1', '1', '1', '1', '0', '1', '0'],
+        ['0', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '0']
+      ]
+    },
+    simulate: (inputs) => {
+      const priority = [
+        { val: 9, pin: 13 },
+        { val: 8, pin: 5 },
+        { val: 7, pin: 4 },
+        { val: 6, pin: 3 },
+        { val: 5, pin: 2 },
+        { val: 4, pin: 1 },
+        { val: 3, pin: 12 },
+        { val: 2, pin: 11 },
+        { val: 1, pin: 10 }
+      ];
+      let activeVal = 0;
+      for (const item of priority) {
+        if (inputs[item.pin] === 0) {
+          activeVal = item.val;
+          break;
+        }
+      }
+      if (activeVal === 0) {
+        return { 14: 1, 9: 1, 7: 1, 6: 1 };
+      }
+      return {
+        14: ((activeVal >> 0) & 1) === 1 ? 0 : 1, // A#
+        9: ((activeVal >> 1) & 1) === 1 ? 0 : 1,  // B#
+        7: ((activeVal >> 2) & 1) === 1 ? 0 : 1,  // C#
+        6: ((activeVal >> 3) & 1) === 1 ? 0 : 1   // D#
+      };
+    }
+  },
+
   '74LS47': {
     id: '74LS47',
     name: '74LS47 BCD to 7-Segment Decoder / Driver',
@@ -1059,10 +1237,12 @@ const IC_LIBRARY = {
       ]
     },
     simulate: (inputs) => {
-      if (inputs[3] === 0) {
+      const lt = inputs[3] !== undefined ? inputs[3] : 1;
+      const bi = inputs[4] !== undefined ? inputs[4] : 1;
+      if (lt === 0) {
         return { 13: 0, 12: 0, 11: 0, 10: 0, 9: 0, 15: 0, 14: 0 };
       }
-      if (inputs[4] === 0) {
+      if (bi === 0) {
         return { 13: 1, 12: 1, 11: 1, 10: 1, 9: 1, 15: 1, 14: 1 };
       }
 
@@ -1265,6 +1445,82 @@ const IC_LIBRARY = {
         14: state.ff1_q === 1 ? 0 : 1,
         11: state.ff2_q,
         12: state.ff2_q === 1 ? 0 : 1
+      };
+    }
+  },
+
+  '74LS73': {
+    id: '74LS73',
+    name: '74LS73 Dual J-K Flip-Flop with Clear',
+    category: IC_CATEGORIES.SEQUENTIAL,
+    pins: 14,
+    description: 'Two independent J-K flip-flops with pulse-triggered negative-edge clocks and asynchronous active-low reset.',
+    pinout: {
+      1: { name: '1CLK', type: 'input', desc: 'FF 1 Clock (Falling Edge)' },
+      2: { name: '1CLR#', type: 'input', desc: 'FF 1 Clear (Active Low)' },
+      3: { name: '1K', type: 'input', desc: 'FF 1 K Input' },
+      4: { name: 'VCC', type: 'vcc', desc: 'Positive Supply (+5V)' },
+      5: { name: '2CLK', type: 'input', desc: 'FF 2 Clock (Falling Edge)' },
+      6: { name: '2CLR#', type: 'input', desc: 'FF 2 Clear (Active Low)' },
+      7: { name: '2J', type: 'input', desc: 'FF 2 J Input' },
+      8: { name: '2Q#', type: 'output', desc: 'FF 2 Inverted Output' },
+      9: { name: '2Q', type: 'output', desc: 'FF 2 True Output' },
+      10: { name: '2K', type: 'input', desc: 'FF 2 K Input' },
+      11: { name: 'GND', type: 'gnd', desc: 'Ground (0V)' },
+      12: { name: '1Q', type: 'output', desc: 'FF 1 True Output' },
+      13: { name: '1Q#', type: 'output', desc: 'FF 1 Inverted Output' },
+      14: { name: '1J', type: 'input', desc: 'FF 1 J Input' }
+    },
+    truthTable: {
+      headers: ['CLR#', 'CLK', 'J', 'K', 'Q (Next)', 'Operating Mode'],
+      rows: [
+        ['0', 'X', 'X', 'X', '0', 'Asynchronous Reset (Clear)'],
+        ['1', '↓', '0', '0', 'Q0', 'Hold (No change)'],
+        ['1', '↓', '0', '1', '0', 'Reset (Q = 0)'],
+        ['1', '↓', '1', '0', '1', 'Set (Q = 1)'],
+        ['1', '↓', '1', '1', 'Q0#', 'Toggle']
+      ]
+    },
+    initState: () => ({
+      ff1_q: 0,
+      ff1_clk_prev: 0,
+      ff2_q: 0,
+      ff2_clk_prev: 0
+    }),
+    simulate: (inputs, state) => {
+      const clr1 = inputs[2] !== undefined ? inputs[2] : 1;
+      const clk1 = inputs[1] || 0;
+      const j1 = inputs[14] || 0;
+      const k1 = inputs[3] || 0;
+
+      if (clr1 === 0) {
+        state.ff1_q = 0;
+      } else if (clk1 === 0 && state.ff1_clk_prev === 1) {
+        if (j1 === 0 && k1 === 1) state.ff1_q = 0;
+        else if (j1 === 1 && k1 === 0) state.ff1_q = 1;
+        else if (j1 === 1 && k1 === 1) state.ff1_q = state.ff1_q === 1 ? 0 : 1;
+      }
+      state.ff1_clk_prev = clk1;
+
+      const clr2 = inputs[6] !== undefined ? inputs[6] : 1;
+      const clk2 = inputs[5] || 0;
+      const j2 = inputs[7] || 0;
+      const k2 = inputs[10] || 0;
+
+      if (clr2 === 0) {
+        state.ff2_q = 0;
+      } else if (clk2 === 0 && state.ff2_clk_prev === 1) {
+        if (j2 === 0 && k2 === 1) state.ff2_q = 0;
+        else if (j2 === 1 && k2 === 0) state.ff2_q = 1;
+        else if (j2 === 1 && k2 === 1) state.ff2_q = state.ff2_q === 1 ? 0 : 1;
+      }
+      state.ff2_clk_prev = clk2;
+
+      return {
+        12: state.ff1_q,
+        13: state.ff1_q === 1 ? 0 : 1,
+        9: state.ff2_q,
+        8: state.ff2_q === 1 ? 0 : 1
       };
     }
   },
@@ -1926,10 +2182,29 @@ class CircuitSimulator {
         const icDef = IC_LIBRARY[base.icId];
         if (!icDef || !icDef.simulate) return;
 
-        // Collect inputs for this IC
+        // Determine which logical pins are actively connected to wires in the circuit
+        const connectedLogicalPins = new Set();
+        this.wires.forEach(w => {
+          [w.from, w.to].forEach(ep => {
+            if (!ep) return;
+            const norm = this._normalizeEndpoint(ep);
+            if (norm && norm.comp === `icbase_${bIdx}`) {
+              const logicalPin = this._getLogicalPin(norm.pin, icDef.pins);
+              if (logicalPin >= 1 && logicalPin <= icDef.pins) {
+                connectedLogicalPins.add(logicalPin);
+              }
+            }
+          });
+        });
+
+        // Collect inputs for this IC:
+        // Only set inputs[p] if pin p is connected to a wire in the circuit.
+        // Unconnected pins remain undefined so IC default behaviors apply.
         const inputs = {};
         for (let p = 1; p <= icDef.pins; p++) {
-          inputs[p] = base.pins[p] ? base.pins[p].level : 0;
+          if (connectedLogicalPins.has(p)) {
+            inputs[p] = base.pins[p] ? base.pins[p].level : 0;
+          }
         }
 
         // Run IC logic evaluation
@@ -2056,38 +2331,39 @@ class CircuitSimulator {
     this.notify();
   }
 
+  _getLogicalPin(pinStr, icPins) {
+    const s = String(pinStr).trim();
+    let pinNum = Number(s);
+    if (s.startsWith('socket_')) {
+      const sNum = parseInt(s.replace('socket_', ''), 10);
+      if (icPins === 14 && sNum >= 14 && sNum <= 20) {
+        return 14 - (20 - sNum);
+      } else if (icPins === 16 && sNum >= 13 && sNum <= 20) {
+        return 16 - (20 - sNum);
+      } else {
+        return sNum;
+      }
+    } else if (icPins === 14 && pinNum > 14 && pinNum <= 20) {
+      return 14 - (20 - pinNum);
+    } else if (icPins === 16 && pinNum > 16 && pinNum <= 20) {
+      return 16 - (20 - pinNum);
+    }
+    return pinNum;
+  }
+
   _applySignalToEndpoint(endpoint, signal) {
     if (endpoint.comp.startsWith('icbase_')) {
       const bIdx = Number(endpoint.comp.replace('icbase_', ''));
-      let pinStr = String(endpoint.pin).trim();
       const base = this.icBases[bIdx];
       if (!base || !base.icId) return;
 
       const icDef = IC_LIBRARY[base.icId];
       if (!icDef) return;
 
-      let pinNum = Number(pinStr);
-
-      // Translate socket pin number to IC pin number if socket pin was targeted
-      if (pinStr.startsWith('socket_')) {
-        const sNum = parseInt(pinStr.replace('socket_', ''), 10);
-        if (icDef.pins === 14 && sNum >= 14 && sNum <= 20) {
-          pinNum = 14 - (20 - sNum);
-        } else if (icDef.pins === 16 && sNum >= 13 && sNum <= 20) {
-          pinNum = 16 - (20 - sNum);
-        } else {
-          pinNum = sNum;
-        }
-      } else if (icDef.pins === 14 && pinNum > 14 && pinNum <= 20) {
-        pinNum = 14 - (20 - pinNum); // 20 -> 14 (VCC), 19 -> 13, ..., 15 -> 9
-      } else if (icDef.pins === 16 && pinNum > 16 && pinNum <= 20) {
-        pinNum = 16 - (20 - pinNum); // 20 -> 16 (VCC), 19 -> 15, ..., 17 -> 9
-      }
+      const pinNum = this._getLogicalPin(endpoint.pin, icDef.pins);
 
       if (base.pins[pinNum] && base.pins[pinNum].type === 'input') {
-        if (signal === 1) {
-          base.pins[pinNum].level = 1;
-        }
+        base.pins[pinNum].level = signal;
       }
     }
   }

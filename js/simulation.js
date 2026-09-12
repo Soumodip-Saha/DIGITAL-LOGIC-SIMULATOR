@@ -371,10 +371,29 @@ export class CircuitSimulator {
         const icDef = IC_LIBRARY[base.icId];
         if (!icDef || !icDef.simulate) return;
 
-        // Collect inputs for this IC
+        // Determine which logical pins are actively connected to wires in the circuit
+        const connectedLogicalPins = new Set();
+        this.wires.forEach(w => {
+          [w.from, w.to].forEach(ep => {
+            if (!ep) return;
+            const norm = this._normalizeEndpoint(ep);
+            if (norm && norm.comp === `icbase_${bIdx}`) {
+              const logicalPin = this._getLogicalPin(norm.pin, icDef.pins);
+              if (logicalPin >= 1 && logicalPin <= icDef.pins) {
+                connectedLogicalPins.add(logicalPin);
+              }
+            }
+          });
+        });
+
+        // Collect inputs for this IC:
+        // Only set inputs[p] if pin p is connected to a wire in the circuit.
+        // Unconnected pins remain undefined so IC default behaviors apply.
         const inputs = {};
         for (let p = 1; p <= icDef.pins; p++) {
-          inputs[p] = base.pins[p] ? base.pins[p].level : 0;
+          if (connectedLogicalPins.has(p)) {
+            inputs[p] = base.pins[p] ? base.pins[p].level : 0;
+          }
         }
 
         // Run IC logic evaluation
@@ -501,38 +520,39 @@ export class CircuitSimulator {
     this.notify();
   }
 
+  _getLogicalPin(pinStr, icPins) {
+    const s = String(pinStr).trim();
+    let pinNum = Number(s);
+    if (s.startsWith('socket_')) {
+      const sNum = parseInt(s.replace('socket_', ''), 10);
+      if (icPins === 14 && sNum >= 14 && sNum <= 20) {
+        return 14 - (20 - sNum);
+      } else if (icPins === 16 && sNum >= 13 && sNum <= 20) {
+        return 16 - (20 - sNum);
+      } else {
+        return sNum;
+      }
+    } else if (icPins === 14 && pinNum > 14 && pinNum <= 20) {
+      return 14 - (20 - pinNum);
+    } else if (icPins === 16 && pinNum > 16 && pinNum <= 20) {
+      return 16 - (20 - pinNum);
+    }
+    return pinNum;
+  }
+
   _applySignalToEndpoint(endpoint, signal) {
     if (endpoint.comp.startsWith('icbase_')) {
       const bIdx = Number(endpoint.comp.replace('icbase_', ''));
-      let pinStr = String(endpoint.pin).trim();
       const base = this.icBases[bIdx];
       if (!base || !base.icId) return;
 
       const icDef = IC_LIBRARY[base.icId];
       if (!icDef) return;
 
-      let pinNum = Number(pinStr);
-
-      // Translate socket pin number to IC pin number if socket pin was targeted
-      if (pinStr.startsWith('socket_')) {
-        const sNum = parseInt(pinStr.replace('socket_', ''), 10);
-        if (icDef.pins === 14 && sNum >= 14 && sNum <= 20) {
-          pinNum = 14 - (20 - sNum);
-        } else if (icDef.pins === 16 && sNum >= 13 && sNum <= 20) {
-          pinNum = 16 - (20 - sNum);
-        } else {
-          pinNum = sNum;
-        }
-      } else if (icDef.pins === 14 && pinNum > 14 && pinNum <= 20) {
-        pinNum = 14 - (20 - pinNum); // 20 -> 14 (VCC), 19 -> 13, ..., 15 -> 9
-      } else if (icDef.pins === 16 && pinNum > 16 && pinNum <= 20) {
-        pinNum = 16 - (20 - pinNum); // 20 -> 16 (VCC), 19 -> 15, ..., 17 -> 9
-      }
+      const pinNum = this._getLogicalPin(endpoint.pin, icDef.pins);
 
       if (base.pins[pinNum] && base.pins[pinNum].type === 'input') {
-        if (signal === 1) {
-          base.pins[pinNum].level = 1;
-        }
+        base.pins[pinNum].level = signal;
       }
     }
   }
