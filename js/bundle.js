@@ -6342,7 +6342,7 @@ class DELDBackendClient {
     if (loc && (loc.origin.startsWith('http://127.0.0.1:8000') || loc.origin.startsWith('http://localhost:8000'))) {
       this.baseUrl = loc.origin;
     } else {
-      this.baseUrl = 'http://127.0.0.1:8000';
+      this.baseUrl = 'https://dls-backend-final.onrender.com';
     }
 
     this.isConnected = false;
