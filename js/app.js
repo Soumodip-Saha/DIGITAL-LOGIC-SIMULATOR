@@ -1031,12 +1031,60 @@ class DeldApp {
     modal.classList.remove('hidden');
   }
 
-  renderCircuitTruthTable() {
+  updateBackendStatusBadge(connected = null, latency = null) {
+    const badge = document.getElementById('ttBackendStatusBadge');
+    if (!badge) return;
+
+    const isConn = connected !== null ? connected : (window.backendClient && window.backendClient.isConnected);
+    const ms = latency !== null ? latency : (window.backendClient ? window.backendClient.latencyMs : null);
+
+    if (isConn) {
+      const latencyStr = (ms && ms < 1000) ? ` • ${ms}ms` : '';
+      badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200 flex items-center gap-1.5 transition-all shadow-xs';
+      badge.innerHTML = `
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span>Backend Engine (FastAPI${latencyStr})</span>
+      `;
+    } else {
+      badge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold border border-amber-200 flex items-center gap-1.5 transition-all';
+      badge.innerHTML = `
+        <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+        <span>Standalone Mode (Client Engine)</span>
+      `;
+    }
+  }
+
+  async renderCircuitTruthTable() {
     const summaryEl = document.getElementById('ttCircuitSummary');
     const container = document.getElementById('ttCircuitContainer');
     if (!container) return;
 
-    const tt = this.sim.generateCircuitTruthTable();
+    // Check backend connection
+    if (window.backendClient) {
+      window.backendClient.checkConnection().then(conn => {
+        this.updateBackendStatusBadge(conn, window.backendClient.latencyMs);
+      });
+    }
+
+    // 1. Initial local simulation (instant UI feedback)
+    let tt = this.sim.generateCircuitTruthTable();
+
+    // 2. Query Python FastAPI backend if circuit has inputs & outputs
+    if (window.backendClient && tt.inputs.length > 0 && tt.outputs.length > 0) {
+      try {
+        const isConn = await window.backendClient.checkConnection();
+        this.updateBackendStatusBadge(isConn, window.backendClient.latencyMs);
+        if (isConn) {
+          const backendTT = await window.backendClient.calculateCircuitTruthTable(this.sim.serialize());
+          if (backendTT && backendTT.status === 'success' && backendTT.rows && backendTT.rows.length > 0) {
+            tt = backendTT;
+          }
+        }
+      } catch (err) {
+        console.warn('[TruthTable] Backend fetch failed, falling back to local simulation:', err);
+        this.updateBackendStatusBadge(false);
+      }
+    }
 
     // 1. If empty or no complete circuit path
     if (!tt.rows || tt.rows.length === 0) {
@@ -1115,6 +1163,19 @@ class DeldApp {
               }).join('')}
             </div>
           </div>
+
+          <!-- Optional Expressions from Backend -->
+          ${tt.expressions ? `
+          <div class="col-span-full border-t border-slate-200 pt-2 flex flex-wrap items-center gap-2">
+            <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Logic Equations:</span>
+            ${Object.entries(tt.expressions).map(([ledNum, exp]) => `
+              <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[11px] flex items-center gap-1">
+                <strong>OUT ${ledNum}</strong> = ${exp.simplified || exp.sopCanonical}
+                <span class="text-slate-400 text-[10px] font-normal">(${exp.sopCanonical})</span>
+              </span>
+            `).join('')}
+          </div>
+          ` : ''}
         </div>
       `;
     }
@@ -1171,13 +1232,25 @@ class DeldApp {
     });
   }
 
-  renderICTruthTable(icId) {
+  async renderICTruthTable(icId) {
     const container = document.getElementById('truthTableContainer');
     const descEl = document.getElementById('truthTableActiveDescription');
     if (!container) return;
 
-    const ic = IC_LIBRARY[icId];
+    let ic = IC_LIBRARY[icId];
     if (!ic) return;
+
+    // Check backend for reference truth table
+    if (window.backendClient && window.backendClient.isConnected) {
+      try {
+        const backendIC = await window.backendClient.getICTruthTable(icId);
+        if (backendIC && backendIC.headers && backendIC.rows) {
+          ic = { ...ic, truthTable: { headers: backendIC.headers, rows: backendIC.rows } };
+        }
+      } catch (err) {
+        console.warn('[TruthTable] Backend fetch for IC failed, using local definition:', err);
+      }
+    }
 
     if (descEl) {
       descEl.innerHTML = `

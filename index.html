@@ -611,10 +611,14 @@
     <div class="modal-window w-full max-w-3xl p-6">
       <div class="flex items-center justify-between pb-3 border-b border-slate-200">
         <div>
-          <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+          <h2 class="text-lg font-bold text-slate-900 flex flex-wrap items-center gap-2">
             <span>Live Truth Table Inspector</span>
             <span class="text-xs px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold border border-sky-200">
               Interactive
+            </span>
+            <span id="ttBackendStatusBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold border border-slate-200 flex items-center gap-1.5 transition-all">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Backend Engine Ready</span>
             </span>
           </h2>
           <p class="text-xs text-slate-500">End-to-end circuit truth table from initial inputs to final outputs.</p>
